@@ -105,7 +105,8 @@ def refresh_vl10g(session):
 def get_all_rows_from_vl10g(session):
     """
     VL10G 목록 전체 행 읽기.
-    반환: [{'grid_idx': i, 'orig_doc': '7***', 'doc_type': 'ZOR', 'deliv_block': 'ZZ', 'vbeln': '...'}, ...]
+    반환: [{'grid_idx': i, 'orig_doc': '7***', 'doc_type': 'ZOR',
+            'deliv_block': 'ZZ', 'vbeln': '...', 'name1': '회사명'}, ...]
     """
     rows = []
     try:
@@ -131,6 +132,7 @@ def get_all_rows_from_vl10g(session):
                     'doc_type':    safe_get(COL_DOC_TYPE),
                     'deliv_block': safe_get(COL_DELIV_BLOCK),
                     'vbeln':       safe_get(COL_VBELN),
+                    'name1':       safe_get("NAME1"),
                 })
             except Exception as e:
                 logger.warning(f"VL10G 행 {i} 읽기 오류: {e}")
@@ -141,35 +143,77 @@ def get_all_rows_from_vl10g(session):
     return rows
 
 
+def _read_status_bar(session):
+    """SAP 상태바 메시지 읽기."""
+    try:
+        return session.findById("wnd[0]/sbar").Text.strip()
+    except Exception:
+        return ''
+
+
+def build_blocked_order_row(orig_doc, doc_type, deliv_block, name1, error_msg):
+    """
+    블록/에러 오더용 Excel 행 생성 (아이템 없음).
+    A열: doc_type + orig_doc, G열: 회사명, H열: 블록 정보 + 에러메시지
+    """
+    memo = f"[Delivery Block: {deliv_block}]"
+    if error_msg:
+        memo += f"\n{error_msg}"
+    return [{
+        'order_prefix':  '',
+        'order_type':    doc_type,
+        'order_num':     orig_doc,
+        'extra_orders':  [],
+        'material':      '',
+        'description':   '',
+        'customer':      '',
+        'phone':         '',
+        'company':       name1,
+        'street':        '',
+        'street2':       '',
+        'memo':          memo,
+        'is_first_item': True,
+    }]
+
+
 def release_delivery_block(session, grid_idx, orig_doc):
     """
-    VL10G에서 ZZ/ZS Delivery Block 해제.
+    VL10G에서 ZZ/ZS Delivery Block 해제 시도.
     OriginDoc 클릭 → Delivery Block 공백 선택 → 저장 → 복귀.
-    반환: True(성공) / False(실패 - 수동 필요)
+    반환: (True, '') 성공 / (False, 에러메시지) 실패
     """
     logger.info(f"Delivery Block 해제 중: {orig_doc} (행 {grid_idx})")
     try:
         grid = session.findById(VL10G_GRID_PATH)
-        # OriginDoc 셀 클릭 (단일 클릭으로 진입)
         grid.setCurrentCell(grid_idx, COL_ORIG_DOC)
         grid.clickCurrentCell()
         time.sleep(1.5)
 
         title = session.findById("wnd[0]").Text
-        if "Sales Order" not in title and "VA02" not in title and "Change" not in title:
-            logger.warning(f"오더 {orig_doc} 진입 실패 (화면: {title})")
-            return False
+        sbar_msg = _read_status_bar(session)
+        logger.info(f"진입 후 화면: '{title}' / 상태바: '{sbar_msg}'")
 
-        # Delivery Block 필드 → 공백(빈 항목) 선택
+        # 진입 실패 (에러 화면) → 상태바 메시지 캡처 후 복귀
+        if sbar_msg or "Change Sales Documents" in title or "Overview" not in title:
+            if not sbar_msg:
+                sbar_msg = f"화면 진입 실패: {title}"
+            logger.warning(f"오더 {orig_doc} Block 해제 불가: {sbar_msg}")
+            session.findById("wnd[0]").sendVKey(3)
+            time.sleep(1)
+            return False, sbar_msg
+
+        # Delivery Block 필드 → 공백 선택
         block_field_candidates = [
             "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD/tabpT\\01/ssubSUBSCREEN_BODY:SAPMV45A:4400/cmbVBAK-LIFSK",
             "wnd[0]/usr/cmbVBAK-LIFSK",
+            "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD/tabpT\\01/ssubSUBSCREEN_BODY:SAPMV45A:4400/cmbVBAK-LIFSP",
+            "wnd[0]/usr/cmbVBAK-LIFSP",
         ]
         cleared = False
         for fid in block_field_candidates:
             try:
                 field = session.findById(fid)
-                field.key = ""   # 공백 옵션 선택
+                field.key = ""
                 logger.info(f"Delivery Block 공백 선택 ({fid})")
                 cleared = True
                 break
@@ -177,23 +221,25 @@ def release_delivery_block(session, grid_idx, orig_doc):
                 continue
 
         if not cleared:
-            logger.warning(f"오더 {orig_doc} Delivery Block 필드 찾기 실패")
+            msg = "Delivery Block 필드 찾기 실패"
+            logger.warning(f"오더 {orig_doc}: {msg}")
             session.findById("wnd[0]").sendVKey(3)
-            return False
+            return False, msg
 
-        # 저장 (디스크 버튼 = Ctrl+S = VKey 11)
+        # 저장
         session.findById("wnd[0]").sendVKey(11)
         time.sleep(1.5)
         logger.info(f"오더 {orig_doc} Block 해제 저장 완료")
-        return True
+        return True, ''
 
     except Exception as e:
-        logger.error(f"Block 해제 실패 ({orig_doc}): {e}")
+        msg = str(e)
+        logger.error(f"Block 해제 실패 ({orig_doc}): {msg}")
         try:
             session.findById("wnd[0]").sendVKey(3)
         except Exception:
             pass
-        return False
+        return False, msg
 
 
 def push_to_vl06o(session, grid_idx):
@@ -203,12 +249,11 @@ def push_to_vl06o(session, grid_idx):
     """
     try:
         grid = session.findById(VL10G_GRID_PATH)
-        # 맨 왼쪽 회색 박스 클릭 (행 선택)
-        grid.setCurrentCell(grid_idx, grid.ColumnOrder[0])
-        grid.clickCurrentCell()
-        time.sleep(0.5)
+        # selectedRows로 행 선택 후 Background 버튼
+        grid.selectedRows = str(grid_idx)
+        time.sleep(0.3)
 
-        # Background 버튼 클릭 (tbar[1]/btn[19])
+        # Background 버튼 클릭 (tbar[1]/btn[19] = Shift+F7)
         session.findById("wnd[0]/tbar[1]/btn[19]").press()
         time.sleep(2)
         logger.info("Background 버튼 클릭 (tbar[1]/btn[19])")
@@ -233,9 +278,9 @@ def process_vl10g(session, processed):
     }
     """
     result = {
-        'failed_blocks': [],
-        'pushed_to_vl06o': [],
-        'zre_orders': {},
+        'blocked_excel_rows': {},   # {orig_doc: [excel_row]} 블록/에러 오더
+        'pushed_to_vl06o':    [],   # Background 성공 오더
+        'zre_orders':         {},   # ZRE 회수 오더 (추후 처리)
     }
 
     rows = get_all_rows_from_vl10g(session)
@@ -245,7 +290,6 @@ def process_vl10g(session, processed):
 
     logger.info(f"VL10G 행 수: {len(rows)}")
 
-    # 이미 처리된 오더 제외
     new_rows = [r for r in rows if r['orig_doc'] not in processed]
     logger.info(f"새 VL10G 오더: {len(new_rows)}개")
 
@@ -254,30 +298,28 @@ def process_vl10g(session, processed):
         doc_type    = row['doc_type']
         deliv_block = row['deliv_block'].upper()
         grid_idx    = row['grid_idx']
+        name1       = row.get('name1', '')
 
-        # ZZ/ZS Block 해제
+        # ZZ/ZS Block → 해제 시도
         if deliv_block in ('ZZ', 'ZS'):
-            success = release_delivery_block(session, grid_idx, orig_doc)
+            success, err_msg = release_delivery_block(session, grid_idx, orig_doc)
             if not success:
-                result['failed_blocks'].append({
-                    'orig_doc': orig_doc,
-                    'doc_type': doc_type,
-                })
-                logger.warning(f"오더 {orig_doc} 수동 Block 해제 필요")
+                # 해제 불가 → Excel에 블록 정보 + 에러 기록
+                excel_rows = build_blocked_order_row(orig_doc, doc_type, deliv_block, name1, err_msg)
+                result['blocked_excel_rows'][orig_doc] = excel_rows
+                logger.warning(f"오더 {orig_doc} Block 해제 불가 → Excel 기록")
                 continue
-            # 해제 후 새로고침
+            # 해제 성공 → 목록 새로고침
             refresh_vl10g(session)
             rows = get_all_rows_from_vl10g(session)
 
-        # ZRE(회수만): 회수 정보 수집
+        # ZRE(회수만): 향후 처리 (placeholder)
         if doc_type == 'ZRE':
-            logger.info(f"ZRE 회수 오더 {orig_doc} 수집")
-            # TODO: ZRE 오더 상세 진입 후 아이템/주소 수집
-            # (ZRMA_Q와 동일 방식이나 VL10G에서 진입 경로 다름)
-            result['zre_orders'][orig_doc] = []  # placeholder
+            logger.info(f"ZRE 회수 오더 {orig_doc} - 추후 처리")
+            result['zre_orders'][orig_doc] = []
 
         else:
-            # 배송 오더 → VL06O로 이관
+            # 배송 오더 → Background로 VL06O 이관
             success = push_to_vl06o(session, grid_idx)
             if success:
                 result['pushed_to_vl06o'].append(orig_doc)
