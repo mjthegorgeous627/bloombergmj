@@ -3,3 +3,4 @@ __pycache__/
 *.pyo
 automation.log
 processed_orders.json
+credentials.py
