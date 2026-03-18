@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 VL10G_GRID_PATH = "wnd[0]/usr/cntlGRID1/shellcont/shell"
 
 # 그리드 컬럼명 (discover_sap.py 옵션2로 확인 필요)
-COL_ORIG_DOC    = "VGBEL"    # OriginDoc (오더번호)
+COL_ORIG_DOC    = "VBELV"    # OriginDoc (오더번호) — discover 확인
 COL_DOC_TYPE    = "AUART"    # Sales Document Type
-COL_DELIV_BLOCK = "LIFSK"    # Delivery Block (ZZ/ZS 여부)
+COL_DELIV_BLOCK = "LIFSP"    # Delivery Block (ZZ/ZS 여부) — discover 확인
 COL_VBELN       = "VBELN"    # 배송 문서번호
 
 
