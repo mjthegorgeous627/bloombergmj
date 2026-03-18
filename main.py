@@ -183,7 +183,10 @@ def _run_zrma(session, processed, variant, date_mode):
         if not is_on_zrma_list(session):
             navigate_to_zrma_q(session, variant, date_mode)
         else:
-            refresh_zrma_list(session)
+            try:
+                refresh_zrma_list(session)
+            except Exception:
+                logger.info(f"ZRMA_Q ({variant}) 새로고침 스킵 (현재 화면 사용)")
     except Exception as e:
         logger.error(f"ZRMA_Q ({variant}) 이동 실패: {e}")
         return
