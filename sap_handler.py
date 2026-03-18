@@ -60,10 +60,11 @@ def run_transaction(session, tcode):
 
 
 def is_on_list_screen(session):
-    """현재 VL06O 오더 목록 화면인지 확인."""
+    """현재 VL06O 오더 목록 또는 선택 화면인지 확인."""
     try:
         title = session.findById("wnd[0]").Text
-        return "List of Outbound Deliveries" in title
+        return ("List of Outbound Deliveries" in title
+                or "General Delivery List" in title)
     except Exception:
         return False
 
@@ -74,40 +75,37 @@ def navigate_to_vl06o_list(session):
     이미 목록 화면이면 F5(새로고침)만 실행.
     """
     if is_on_list_screen(session):
-        logger.info("이미 목록 화면 - F5 새로고침")
-        session.findById("wnd[0]").sendVKey(5)
+        title = session.findById("wnd[0]").Text
+        if "General Delivery List" in title:
+            # 선택화면 → F8로 실행
+            logger.info("선택화면 → F8 실행")
+            session.findById("wnd[0]").sendVKey(8)
+        else:
+            # 목록화면 → F5 새로고침
+            logger.info("이미 목록 화면 - F5 새로고침")
+            session.findById("wnd[0]").sendVKey(5)
         time.sleep(2)
         return
 
     logger.info("VL06O 진입 중...")
     run_transaction(session, "VL06O")
-    time.sleep(1)
+    time.sleep(1.5)
 
-    # Ctrl+F7: Display Variants 팝업 열기
-    session.findById("wnd[0]").sendVKey(31)
-    time.sleep(1)
+    # Variant 필드가 숨겨져 있으면 "Display Variants" 버튼으로 표시
+    try:
+        session.findById("wnd[0]/usr/ctxtLF_SVAR6")
+    except Exception:
+        session.findById("wnd[0]/tbar[1]/btn[31]").press()
+        time.sleep(0.5)
 
-    # Variant 입력 (My Variant 필드)
-    for field_id in [
-        "wnd[1]/usr/txtV-LOW",
-        "wnd[1]/usr/txtENAME-LOW",
-        "wnd[1]/usr/txtVARIANT",
-    ]:
-        try:
-            session.findById(field_id).text = "KSCPs1"
-            logger.info(f"Variant 입력 완료 ({field_id})")
-            break
-        except Exception:
-            continue
-
-    time.sleep(0.3)
-    # Enter로 선택 확정
-    session.findById("wnd[1]").sendVKey(0)
-    time.sleep(0.5)
-
-    # F8: Execute
-    session.findById("wnd[0]").sendVKey(8)
+    # "List Outbound Deliveries" 행의 Variant 필드에 KSCPs1 입력 후 버튼 클릭
+    session.findById("wnd[0]/usr/ctxtLF_SVAR6").text = "KSCPs1"
+    session.findById("wnd[0]/usr/btnBUTTON6").press()
     time.sleep(2)
+
+    # 선택화면(General Delivery List)에서 F8로 실행
+    session.findById("wnd[0]").sendVKey(8)
+    time.sleep(3)
     logger.info("목록 화면 진입 완료")
 
 

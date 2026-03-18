@@ -139,8 +139,8 @@ def write_orders_to_excel(order_data_list):
         # C열: M/N (숫자형 방지 - 문자열로 저장)
         ws.cells(row_num, 3).value = str(item.get('material', ''))
 
-        # D열: S/N (비워둠)
-        ws.cells(row_num, 4).value = ''
+        # D열: S/N (회수 아이템은 SAP에서 수집, 없으면 X, 배송은 공백)
+        ws.cells(row_num, 4).value = item.get('serial_number', '')
 
         # E열: 담당자
         ws.cells(row_num, 5).value = item.get('customer', '')
@@ -164,12 +164,19 @@ def write_orders_to_excel(order_data_list):
         cell_g.value = '\n'.join(address_parts)
         cell_g.api.WrapText = True
 
-        # H열: 메모 (모든 행에 기입)
+        # H열: 메모 (모든 행에 기입, 상단에 타임스탬프 추가)
         memo = item.get('memo', '')
-        if memo:
-            cell_h = ws.cells(row_num, 8)
-            cell_h.value = memo
-            cell_h.api.WrapText = True
+        timestamp = datetime.now().strftime('%y.%m.%d %H:%M')
+        memo_with_ts = f"{timestamp}\n{memo}" if memo else timestamp
+        cell_h = ws.cells(row_num, 8)
+        cell_h.value = memo_with_ts
+        cell_h.api.WrapText = True
+
+    # E/F/G/H 열 병합 (같은 오더의 여러 행)
+    if num_rows > 1:
+        end_row = insert_at + num_rows - 1
+        for col in [5, 6, 7, 8]:  # E=담당자, F=전화, G=주소, H=메모
+            ws.range(ws.cells(insert_at, col), ws.cells(end_row, col)).api.Merge()
 
     # 모든 테두리 적용 (A~H, insert_at ~ insert_at+num_rows-1)
     border_range = ws.range(

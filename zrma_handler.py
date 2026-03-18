@@ -23,6 +23,24 @@ logger = logging.getLogger(__name__)
 # 확인 필요한 element ID (discover_sap.py로 확인 후 업데이트)
 ZRMA_GRID_PATH = "wnd[0]/usr/cntlCUST_CONT/shellcont/shell"
 
+# All Items 테이블 경로
+ZRMA_ITEMS_TABLE_PATH = (
+    "wnd[0]/usr/tabsTAXI_TABSTRIP_OVERVIEW/tabpT\\01"
+    "/ssubSUBSCREEN_BODY:SAPMV45A:4400"
+    "/subSUBSCREEN_TC:SAPMV45A:4900"
+    "/tblSAPMV45ATCTRL_U_ERF_AUFTRAG"
+)
+
+# Extras > Technical objects 메뉴 (menu[3]=Extras, menu[7]=Technical objects)
+EXTRAS_TECH_OBJ = "wnd[0]/mbar/menu[3]/menu[7]"
+
+# Maintain Serial Numbers 팝업의 S/N 테이블 경로 후보
+_SN_TABLE_IDS = [
+    "wnd[1]/usr/tblSAPLAQSE_TC_SERIAL",
+    "wnd[1]/usr/tblSAPLAQS1TC_SERIAL",
+    "wnd[1]/usr/sub0001/tblSAPLAQSE_TC_SERIAL",
+]
+
 
 def _end_of_next_month_str():
     """다음달 말일 (SAP 날짜 입력 형식)."""
@@ -48,15 +66,15 @@ def navigate_to_zrma_q(session, variant, date_mode='next_month'):
     run_transaction(session, "ZRMA_Q")
     time.sleep(1.5)
 
-    # Get Variants: Shift+F5
-    session.findById("wnd[0]").sendVKey(25)
+    # Get Variants 버튼 클릭 (tbar[1]/btn[17] = Shift+F5)
+    session.findById("wnd[0]/tbar[1]/btn[17]").press()
     time.sleep(1)
 
     # 팝업: Variant 입력
     for fid in ["wnd[1]/usr/txtV-LOW", "wnd[1]/usr/txtVARIANT"]:
         try:
             session.findById(fid).text = variant.upper()
-            logger.info(f"Variant 입력 ({fid})")
+            logger.info(f"Variant 입력 ({fid}): {variant.upper()}")
             break
         except Exception:
             continue
@@ -65,7 +83,6 @@ def navigate_to_zrma_q(session, variant, date_mode='next_month'):
     for fid in ["wnd[1]/usr/txtENAME-LOW", "wnd[1]/usr/txtUSER-LOW"]:
         try:
             session.findById(fid).text = ""
-            logger.info(f"Created By 공백 ({fid})")
             break
         except Exception:
             continue
@@ -74,23 +91,13 @@ def navigate_to_zrma_q(session, variant, date_mode='next_month'):
     session.findById("wnd[1]").sendVKey(8)
     time.sleep(1.5)
 
-    # Creation Date to 필드 수정
+    # Creation Date to 필드 수정 (discover 확인된 ID)
     date_to = _end_of_next_month_str() if date_mode == 'next_month' else _end_of_year_str()
-    for fid in [
-        "wnd[0]/usr/ctxtS_ERDAT-HIGH",
-        "wnd[0]/usr/txtS_ERDAT-HIGH",
-        "wnd[0]/usr/ctxtSEL_ERDAT-HIGH",
-        "wnd[0]/usr/ctxtS_CDAT-HIGH",
-    ]:
-        try:
-            session.findById(fid).text = date_to
-            logger.info(f"날짜(to) 설정 ({fid}): {date_to}")
-            break
-        except Exception:
-            continue
+    session.findById("wnd[0]/usr/ctxtS_ERDAT-HIGH").text = date_to
+    logger.info(f"날짜(to) 설정: {date_to}")
 
     # F8: Execute (목록 화면)
-    session.findById("wnd[0]").sendVKey(8)
+    session.findById("wnd[0]/tbar[1]/btn[8]").press()
     time.sleep(2)
 
     # 레이아웃 /6507 PETER 적용
@@ -193,6 +200,123 @@ def get_all_rows_from_zrma(session):
     return rows
 
 
+def _close_tech_obj_popup(session):
+    """
+    Technical objects 팝업(wnd[1]) 닫기.
+    F12 → 'Would you like to terminate processing?' → Yes 클릭.
+    """
+    try:
+        session.findById("wnd[1]").sendVKey(12)  # F12
+        time.sleep(0.8)
+    except Exception:
+        return
+
+    # "Would you like to terminate processing?" 대화상자 처리
+    for popup_id in ["wnd[2]", "wnd[1]"]:
+        try:
+            session.findById(popup_id)  # 팝업 존재 확인
+        except Exception:
+            continue
+
+        yes_clicked = False
+        for btn_id in [
+            f"{popup_id}/usr/btnSPOPLI-SELFLAG",  # SPOPLI Yes 버튼
+            f"{popup_id}/tbar[0]/btn[0]",           # 첫 번째 툴바 버튼
+        ]:
+            try:
+                session.findById(btn_id).press()
+                yes_clicked = True
+                time.sleep(0.5)
+                logger.info(f"terminate processing → Yes ({btn_id})")
+                break
+            except Exception:
+                continue
+
+        if not yes_clicked:
+            # Enter (Yes가 기본값인 경우)
+            try:
+                session.findById(popup_id).sendVKey(0)
+                time.sleep(0.5)
+                logger.info("terminate processing → Enter")
+            except Exception:
+                pass
+        break
+
+
+def _read_serial_numbers_from_popup(session):
+    """
+    'Maintain Serial Numbers' 팝업(wnd[1])에서 S/N 목록 반환.
+    반환: ['SN001', 'SN002', ...] 또는 []
+    """
+    sn_list = []
+    for tbl_id in _SN_TABLE_IDS:
+        try:
+            tbl = session.findById(tbl_id)
+            for i in range(tbl.RowCount):
+                try:
+                    # 컬럼명(SERNR) 우선, 실패 시 첫 번째 컬럼(0)으로
+                    try:
+                        sn = tbl.GetCell(i, "SERNR").Text.strip()
+                    except Exception:
+                        sn = tbl.GetCell(i, 0).Text.strip()
+                    if sn and sn not in sn_list:
+                        sn_list.append(sn)
+                except Exception:
+                    continue
+            break  # 테이블 찾았으면 종료
+        except Exception:
+            continue
+    return sn_list
+
+
+def collect_serial_numbers(session, items):
+    """
+    RETURN 아이템(Bunit 제외)의 S/N을 SAP Technical objects에서 수집.
+    items 리스트의 serial_numbers 필드를 in-place 업데이트.
+
+    흐름: Item Overview 탭 → 행 setCurrentCell → Extras > Technical objects
+          → S/N 읽기 → F12 닫기 → terminate Yes → 반복
+    """
+    needs = [it for it in items if it.get('serial_numbers') is None]
+    if not needs:
+        return
+
+    # Item Overview 탭 활성화 (T\01)
+    try:
+        session.findById(
+            "wnd[0]/usr/tabsTAXI_TABSTRIP_OVERVIEW/tabpT\\01"
+        ).select()
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    for item in needs:
+        row_i = item['table_row_i']
+        logger.info(f"  S/N 수집: [{item['arktx']}] (행 {row_i})")
+
+        try:
+            # 행 선택 (현재 셀 이동 → Extras 메뉴가 해당 행에 적용)
+            table = session.findById(ZRMA_ITEMS_TABLE_PATH)
+            table.setCurrentCell(row_i, 0)
+            time.sleep(0.3)
+
+            # Extras > Technical objects 메뉴 선택
+            session.findById(EXTRAS_TECH_OBJ).select()
+            time.sleep(1.5)
+
+            # S/N 읽기
+            sn_list = _read_serial_numbers_from_popup(session)
+            logger.info(f"    → S/N: {sn_list if sn_list else '없음(X)'}")
+            item['serial_numbers'] = sn_list if sn_list else ['X']
+
+        except Exception as e:
+            logger.warning(f"  S/N 수집 실패 (행 {row_i}): {e}")
+            item['serial_numbers'] = ['X']
+
+        finally:
+            _close_tech_obj_popup(session)
+
+
 def navigate_to_zrma_order(session, grid_idx):
     """목록에서 오더 더블클릭으로 진입."""
     try:
@@ -261,13 +385,25 @@ def get_items_from_zrma_order(session, order_num, order_type):
                     prefix = '배송'  # 기본값
                     logger.warning(f"Route 판단 불명확: '{route}' → 배송으로 처리")
 
+                # 회수 아이템 S/N 초기 설정
+                is_return = (prefix == '회수')
+                is_bunit  = 'BUNIT' in arktx.upper()
+                if is_return and is_bunit:
+                    sn_list = ['X']   # Bunit: S/N 없음 (Technical objects 진입 불필요)
+                elif is_return:
+                    sn_list = None    # 나중에 collect_serial_numbers에서 수집
+                else:
+                    sn_list = []      # 배송: S/N 불필요
+
                 items.append({
-                    'prefix':     prefix,
-                    'order_type': order_type,
-                    'order_num':  order_num,
-                    'matnr':      matnr,
-                    'arktx':      arktx,
-                    'qty':        qty,
+                    'prefix':         prefix,
+                    'order_type':     order_type,
+                    'order_num':      order_num,
+                    'matnr':          matnr,
+                    'arktx':          arktx,
+                    'qty':            qty,
+                    'table_row_i':    i,        # Technical objects 진입용 행 인덱스
+                    'serial_numbers': sn_list,  # None=미수집, []=S/N없음, ['SN...']=수집됨
                 })
 
             except Exception as e:
@@ -284,6 +420,7 @@ def build_excel_rows_zrma(items, address, extra_orders, memo):
     ZRMA_Q 아이템 리스트 → Excel 행 리스트.
     아이템별 qty만큼 행 생성. 첫 번째 행에만 고객/주소 정보.
     배송/회수 행이 섞여있을 수 있으므로 prefix별로 그룹화하지 않고 순서대로.
+    serial_numbers: qty 수에 맞게 분배 (부족하면 마지막 값 반복, 없으면 '')
     """
     rows = []
     is_first = True
@@ -292,20 +429,29 @@ def build_excel_rows_zrma(items, address, extra_orders, memo):
     items = sorted(items, key=lambda x: 0 if x['prefix'] == '배송' else 1)
 
     for item in items:
-        for _ in range(item['qty']):
+        sn_list = item.get('serial_numbers') or []  # None → []
+
+        for unit_idx in range(item['qty']):
+            # S/N 분배: unit_idx에 맞는 S/N 선택, 부족하면 마지막 값, 없으면 ''
+            if sn_list:
+                sn = sn_list[unit_idx] if unit_idx < len(sn_list) else sn_list[-1]
+            else:
+                sn = ''
+
             rows.append({
-                'order_prefix': item['prefix'],
-                'order_type':   item['order_type'],
-                'order_num':    item['order_num'],
-                'extra_orders': extra_orders,
-                'material':     item['matnr'],
-                'description':  item['arktx'],
-                'customer':     address.get('customer', ''),
-                'phone':        address.get('phone', ''),
-                'company':      address.get('company', ''),
-                'street':       address.get('street', ''),
-                'street2':      address.get('street2', ''),
-                'memo':         memo,
+                'order_prefix':  item['prefix'],
+                'order_type':    item['order_type'],
+                'order_num':     item['order_num'],
+                'extra_orders':  extra_orders,
+                'material':      item['matnr'],
+                'description':   item['arktx'],
+                'serial_number': sn,
+                'customer':      address.get('customer', ''),
+                'phone':         address.get('phone', ''),
+                'company':       address.get('company', ''),
+                'street':        address.get('street', ''),
+                'street2':       address.get('street2', ''),
+                'memo':          memo,
                 'is_first_item': is_first,
             })
             is_first = False
@@ -360,6 +506,9 @@ def process_zrma_orders(session, new_order_nums, order_map):
             session.findById("wnd[0]").sendVKey(3)
             time.sleep(0.5)
             continue
+
+        # 회수 아이템 S/N 수집 (Extras > Technical objects)
+        collect_serial_numbers(session, items)
 
         rows = build_excel_rows_zrma(items, address, extra_orders, memo)
         results[order_num] = rows

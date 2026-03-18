@@ -13,6 +13,7 @@ SAP 세션 구성 (4개 창 미리 열어둬야 함):
 """
 
 import sys
+import os
 import time
 import logging
 from datetime import datetime
@@ -170,7 +171,7 @@ def _run_vl10g(session, processed):
     if result['pushed_to_vl06o']:
         logger.info(f"VL06O로 이관된 오더: {result['pushed_to_vl06o']}")
 
-    # ZRE 회수 오더 처리 (TODO: 구현 예정)
+    # ZRE 회수 오더 처리 (VL10G ZS 해제 + S/N 수집 완료)
     for order_num, rows in result['zre_orders'].items():
         if rows:
             try:
@@ -227,12 +228,22 @@ def _run_zrma(session, processed, variant, date_mode):
 
 
 
+TRIGGER_FILE = os.path.join(os.path.dirname(__file__), "run_now.flag")
+
+
 def run_loop():
     logger.info(f"자동화 시작 (간격: {REFRESH_INTERVAL_MINUTES}분)")
+    logger.info(f"수동 실행: 다른 터미널에서 'python sap_automation/now.py' 실행")
     while True:
         run_once()
-        logger.info(f"{REFRESH_INTERVAL_MINUTES}분 후 다음 실행...")
-        time.sleep(REFRESH_INTERVAL_MINUTES * 60)
+        logger.info(f"{REFRESH_INTERVAL_MINUTES}분 후 다음 실행... (수동: now.py)")
+        # 5초마다 trigger 파일 확인
+        for _ in range(REFRESH_INTERVAL_MINUTES * 60 // 5):
+            time.sleep(5)
+            if os.path.exists(TRIGGER_FILE):
+                os.remove(TRIGGER_FILE)
+                logger.info("▶ 수동 실행 트리거 감지 → 즉시 실행")
+                break
 
 
 if __name__ == "__main__":
