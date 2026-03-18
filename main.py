@@ -152,10 +152,15 @@ def _run_vl10g(session, processed):
 
     result = process_vl10g(session, processed)
 
-    # Block 해제 실패 오더 → Excel에 알림 기록
-    if result['failed_blocks']:
-        logger.warning(f"수동 Block 해제 필요: {result['failed_blocks']}")
-        _write_block_failed_notice(result['failed_blocks'])
+    # Block 해제 불가 오더 → Excel에 오더번호/회사명/에러 기록
+    for order_num, rows in result['blocked_excel_rows'].items():
+        try:
+            write_orders_to_excel(rows)
+            mark_processed(order_num, processed)
+            save_processed(processed)
+            logger.info(f"VL10G Block 오더 {order_num} Excel 기록 완료")
+        except Exception as e:
+            logger.error(f"VL10G Block 오더 {order_num} 기록 실패: {e}")
 
     if result['pushed_to_vl06o']:
         logger.info(f"VL06O로 이관된 오더: {result['pushed_to_vl06o']}")
@@ -212,30 +217,6 @@ def _run_zrma(session, processed, variant, date_mode):
         except Exception as e:
             logger.error(f"ZRMA 오더 {order_num} Excel 기록 실패: {e}", exc_info=True)
 
-
-def _write_block_failed_notice(failed_list):
-    """Block 해제 실패 오더를 Excel H열에 '수동 해제 필요' 메모로 기록."""
-    for item in failed_list:
-        rows = [{
-            'order_prefix': '확인필요',
-            'order_type':   item.get('doc_type', ''),
-            'order_num':    item.get('orig_doc', ''),
-            'extra_orders': [],
-            'material':     '',
-            'description':  '',
-            'customer':     '',
-            'phone':        '',
-            'company':      '',
-            'street':       '',
-            'street2':      '',
-            'memo':         '[수동 해제 필요] Delivery Block 자동 해제 실패. VA02에서 확인하세요.',
-            'is_first_item': True,
-        }]
-        try:
-            write_orders_to_excel(rows)
-            logger.info(f"Block 실패 알림 기록: {item['orig_doc']}")
-        except Exception as e:
-            logger.error(f"Block 실패 알림 기록 실패: {e}")
 
 
 def run_loop():
