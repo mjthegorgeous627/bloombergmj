@@ -53,17 +53,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_once():
+def run_once(excel_only=False):
     logger.info("=" * 55)
     logger.info(f"실행 시작: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # 처리 완료 오더 로드 + Excel 기존 오더 합산
-    processed = load_processed()
-    excel_existing = get_existing_order_numbers()
-    if excel_existing - processed:
-        logger.info(f"Excel 기존 오더 {len(excel_existing)}개 → processed에 추가")
-        processed = processed | excel_existing
-        save_processed(processed)
+    # excel_only=True: Excel 기록만 기준 (JSON 무시) → 누락 오더 재처리용
+    if excel_only:
+        excel_existing = get_existing_order_numbers()
+        processed = excel_existing.copy()
+        logger.info(f"[catchup] Excel 기준 {len(processed)}개 오더만 기처리로 간주")
+    else:
+        processed = load_processed()
+        excel_existing = get_existing_order_numbers()
+        if excel_existing - processed:
+            logger.info(f"Excel 기존 오더 {len(excel_existing)}개 → processed에 추가")
+            processed = processed | excel_existing
+            save_processed(processed)
 
     # ── 세션0: VL06O ────────────────────────────────────────
     try:
@@ -231,7 +236,9 @@ def run_loop():
 
 
 if __name__ == "__main__":
-    if "--once" in sys.argv:
+    if "--catchup" in sys.argv:
+        run_once(excel_only=True)
+    elif "--once" in sys.argv:
         run_once()
     else:
         run_loop()
