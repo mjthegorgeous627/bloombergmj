@@ -124,7 +124,7 @@ def write_orders_to_excel(order_data_list):
     for idx, item in enumerate(order_data_list):
         row_num = insert_at + idx
 
-        # A열: Order #
+        # A열: Order # (배송/회수 prefix + 오더번호 + 추가 오더번호들)
         order_line = f"{item['order_prefix']} {item['order_type']} {item['order_num']}"
         if item.get('extra_orders'):
             for eo in item['extra_orders']:
@@ -142,38 +142,43 @@ def write_orders_to_excel(order_data_list):
         # D열: S/N (비워둠)
         ws.cells(row_num, 4).value = ''
 
-        # E~H열: 첫 번째 아이템에만 입력 (나중에 병합)
-        if item.get('is_first_item', False):
-            ws.cells(row_num, 5).value = item.get('customer', '')
-            ws.cells(row_num, 6).value = item.get('phone', '')
+        # E열: 담당자
+        ws.cells(row_num, 5).value = item.get('customer', '')
 
-            # G열: ADDRESS
-            address_parts = []
-            if item.get('company'):
-                address_parts.append(item['company'])
-            street = item.get('street', '')
-            street2 = item.get('street2', '')
-            if street and street2:
-                address_parts.append(f"{street}, {street2}")
-            elif street:
-                address_parts.append(street)
-            elif street2:
-                address_parts.append(street2)
-            cell_g = ws.cells(row_num, 7)
-            cell_g.value = '\n'.join(address_parts)
-            cell_g.api.WrapText = True
+        # F열: 전화번호
+        ws.cells(row_num, 6).value = item.get('phone', '')
 
-            # H열: memo
-            if item.get('memo'):
-                cell_h = ws.cells(row_num, 8)
-                cell_h.value = item['memo']
-                cell_h.api.WrapText = True
+        # G열: 주소 (모든 행에 기입)
+        address_parts = []
+        if item.get('company'):
+            address_parts.append(item['company'])
+        street = item.get('street', '')
+        street2 = item.get('street2', '')
+        if street and street2:
+            address_parts.append(f"{street},\n{street2}")
+        elif street:
+            address_parts.append(street)
+        elif street2:
+            address_parts.append(street2)
+        cell_g = ws.cells(row_num, 7)
+        cell_g.value = '\n'.join(address_parts)
+        cell_g.api.WrapText = True
 
-    # E~H열 병합: 같은 오더 여러 행인 경우
-    if num_rows > 1:
-        for col in (5, 6, 7, 8):  # E, F, G, H
-            merge_rng = ws.range(ws.cells(insert_at, col), ws.cells(insert_at + num_rows - 1, col))
-            merge_rng.api.MergeCells = True
+        # H열: 메모 (모든 행에 기입)
+        memo = item.get('memo', '')
+        if memo:
+            cell_h = ws.cells(row_num, 8)
+            cell_h.value = memo
+            cell_h.api.WrapText = True
+
+    # 모든 테두리 적용 (A~H, insert_at ~ insert_at+num_rows-1)
+    border_range = ws.range(
+        ws.cells(insert_at, 1),
+        ws.cells(insert_at + num_rows - 1, 8)
+    )
+    for border_idx in [7, 8, 9, 10, 11, 12]:  # Left/Top/Bottom/Right/InsideV/InsideH
+        border_range.api.Borders(border_idx).LineStyle = 1   # xlContinuous
+        border_range.api.Borders(border_idx).Weight = 2      # xlThin
 
     # 저장
     wb.save()

@@ -316,6 +316,53 @@ def _format_korean(digits):
     return digits
 
 
+def parse_memo_for_display(text):
+    """
+    SAP Text → H열 메모용 정보 추출.
+    - 오더번호 참조 줄 제거 (ZRX/SDSK/ZOR 등으로 시작하는 줄)
+    - Caller Phone, Caller E-Mail 제거 (이미 별도 컬럼에 있음)
+    - Delivery Note, Caller Name, 날짜/시간/배송 지시사항 등 유지
+    """
+    if not text:
+        return ''
+
+    # [Text] 접두사 제거
+    text = re.sub(r'^\[Text\]\s*', '', text.strip())
+
+    ORDER_REF_RE = re.compile(
+        r'^(ZRX|ZRE|ZOR|SOR|ZINX|ZINP|SDSK|ORD#?)\s+\d+',
+        re.IGNORECASE
+    )
+    SKIP_RE = re.compile(
+        r'^(Caller\s+Phone|Caller\s+E-?Mail)\s*[:\-]',
+        re.IGNORECASE
+    )
+
+    result = []
+    prev_blank = False
+    for line in text.split('\n'):
+        s = line.strip()
+        if not s:
+            if result and not prev_blank:
+                result.append('')
+            prev_blank = True
+            continue
+        prev_blank = False
+        if ORDER_REF_RE.match(s):
+            continue
+        if SKIP_RE.match(s):
+            continue
+        result.append(s)
+
+    # 앞뒤 빈 줄 제거
+    while result and result[0] == '':
+        result.pop(0)
+    while result and result[-1] == '':
+        result.pop()
+
+    return '\n'.join(result)
+
+
 def parse_contact_from_text(text):
     """
     텍스트에서 전화번호 등 연락처 추출.
@@ -606,7 +653,7 @@ def build_excel_rows(ebeln, order_info, address, extra_orders, memo):
                 'company':      address.get('company', ''),
                 'street':       address.get('street', ''),
                 'street2':      address.get('street2', ''),
-                'memo':         memo if is_first else '',
+                'memo':         memo,
                 'is_first_item': is_first,
             })
             is_first = False
@@ -644,7 +691,7 @@ def process_new_orders(session, new_ebelns, order_map):
         text = get_text_content(session)
         extra_orders = parse_extra_orders(text) if text else []
         text_contact = parse_contact_from_text(text) if text else {'found': False}
-        memo = f"[Text] {text[:150]}" if text and text_contact['found'] else ""
+        memo = parse_memo_for_display(text) if text else ""
 
         # text에서 전화번호 찾은 경우 주소에 없으면 보완
         if text_contact['found'] and not address.get('phone'):

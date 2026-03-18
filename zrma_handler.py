@@ -14,6 +14,7 @@ from sap_handler import (
     get_text_content,
     parse_extra_orders,
     parse_contact_from_text,
+    parse_memo_for_display,
     ZRMA_MENU_TEXTS,
 )
 
@@ -229,13 +230,17 @@ def get_items_from_zrma_order(session, order_num, order_type):
         row_count = table.RowCount
 
         for i in range(row_count):
+            # GetCell(i,0) 실패 = 가시 범위 초과 → 루프 종료
             try:
                 item_no = table.GetCell(i, 0).Text.strip()
+            except Exception:
+                break
 
-                # 빈 행 또는 개괄명(00) 제외 — 이후 컬럼 접근 전에 처리
-                if not item_no or item_no.endswith('00') or item_no == '000000':
-                    continue
+            # 빈 행 또는 개괄명(00) 제외
+            if not item_no or item_no.endswith('00') or item_no == '000000':
+                continue
 
+            try:
                 matnr   = table.GetCell(i, 1).Text.strip()
                 arktx   = table.GetCell(i, 2).Text.strip()
                 qty_str = table.GetCell(i, 3).Text.strip()
@@ -292,15 +297,15 @@ def build_excel_rows_zrma(items, address, extra_orders, memo):
                 'order_prefix': item['prefix'],
                 'order_type':   item['order_type'],
                 'order_num':    item['order_num'],
-                'extra_orders': extra_orders if is_first else [],
+                'extra_orders': extra_orders,
                 'material':     item['matnr'],
                 'description':  item['arktx'],
-                'customer':     address.get('customer', '') if is_first else '',
-                'phone':        address.get('phone', '') if is_first else '',
-                'company':      address.get('company', '') if is_first else '',
-                'street':       address.get('street', '') if is_first else '',
-                'street2':      address.get('street2', '') if is_first else '',
-                'memo':         memo if is_first else '',
+                'customer':     address.get('customer', ''),
+                'phone':        address.get('phone', ''),
+                'company':      address.get('company', ''),
+                'street':       address.get('street', ''),
+                'street2':      address.get('street2', ''),
+                'memo':         memo,
                 'is_first_item': is_first,
             })
             is_first = False
@@ -340,9 +345,11 @@ def process_zrma_orders(session, new_order_nums, order_map):
 
         # 텍스트 읽기
         text = get_text_content(session, menu_id=ZRMA_MENU_TEXTS)
-        extra_orders = parse_extra_orders(text) if text else []
+        all_extra = parse_extra_orders(text) if text else []
+        # 메인 오더번호와 동일한 항목 제거 (중복 방지)
+        extra_orders = [eo for eo in all_extra if order_num not in eo]
         text_contact = parse_contact_from_text(text) if text else {'found': False}
-        memo = f"[Text] {text[:150]}" if text and text_contact['found'] else ""
+        memo = parse_memo_for_display(text) if text else ""
         if text_contact['found'] and not address.get('phone'):
             address['phone'] = text_contact['phone']
 

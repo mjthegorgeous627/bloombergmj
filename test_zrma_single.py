@@ -7,7 +7,7 @@ import sys
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s',
                     handlers=[logging.StreamHandler(sys.stdout)])
 
-from sap_handler import get_sap_session, get_ship_to_address_zrma, get_text_content, parse_extra_orders, parse_contact_from_text, ZRMA_MENU_TEXTS
+from sap_handler import get_sap_session, get_ship_to_address_zrma, get_text_content, parse_extra_orders, parse_contact_from_text, parse_memo_for_display, ZRMA_MENU_TEXTS
 from zrma_handler import get_all_rows_from_zrma, group_zrma_by_order, navigate_to_zrma_order, get_items_from_zrma_order, build_excel_rows_zrma
 from excel_handler import write_orders_to_excel
 
@@ -38,9 +38,10 @@ print(f"주소: {address}")
 
 # 텍스트
 text = get_text_content(session, menu_id=ZRMA_MENU_TEXTS)
-extra_orders = parse_extra_orders(text) if text else []
+all_extra = parse_extra_orders(text) if text else []
+extra_orders = [eo for eo in all_extra if TARGET not in eo]
 text_contact = parse_contact_from_text(text) if text else {'found': False}
-memo = f"[Text] {text[:150]}" if text and text_contact.get('found') else ""
+memo = parse_memo_for_display(text) if text else ""
 if text_contact.get('found') and not address.get('phone'):
     address['phone'] = text_contact['phone']
 
