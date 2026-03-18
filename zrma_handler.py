@@ -231,14 +231,15 @@ def get_items_from_zrma_order(session, order_num, order_type):
         for i in range(row_count):
             try:
                 item_no = table.GetCell(i, 0).Text.strip()
+
+                # 빈 행 또는 개괄명(00) 제외 — 이후 컬럼 접근 전에 처리
+                if not item_no or item_no.endswith('00') or item_no == '000000':
+                    continue
+
                 matnr   = table.GetCell(i, 1).Text.strip()
                 arktx   = table.GetCell(i, 2).Text.strip()
                 qty_str = table.GetCell(i, 3).Text.strip()
                 route   = table.GetCell(i, 12).Text.strip()
-
-                # 00으로 끝나는 개괄명 제외
-                if not item_no or item_no.endswith('00') or item_no == '000000':
-                    continue
 
                 try:
                     qty = max(1, int(float(qty_str)))

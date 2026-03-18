@@ -492,13 +492,18 @@ _ZRMA_PARTNER_TABLE = (
     "/subSUBSCREEN_PARTNER_OVERVIEW:SAPLV09C:1000"
     "/tblSAPLV09CGV_TC_PARTNER_OVERVIEW"
 )
+_ZRMA_PARTNER_SUB = (
+    "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD/tabpT\\07"
+    "/ssubSUBSCREEN_BODY:SAPMV45A:4352"
+    "/subSUBSCREEN_PARTNER_OVERVIEW:SAPLV09C:1000"
+)
 
 
 def get_ship_to_address_zrma(session):
     """
-    ZRMA_Q 오더 상세 화면에서 Ship-to Party 주소 읽기.
-    Goto > Header > Partners(tabpT\\07) 테이블에서 직접 읽기.
-    Col 0=PARVW, 1=PARTNER_EXT, 4=NAME1, 5=STREET, 6=POST_CODE1, 7=CITY1
+    ZRMA_Q 오더에서 Ship-to Party 주소 읽기.
+    Goto > Header > Partners → Ship-to 행 포커스 → btnDETAIL 클릭
+    → SAPLSZA1 팝업에서 company/customer/street/street2/phone 읽기.
     """
     result = {'company': '', 'customer': '', 'street': '', 'street2': '', 'phone': ''}
 
@@ -508,95 +513,66 @@ def get_ship_to_address_zrma(session):
 
         table = session.findById(_ZRMA_PARTNER_TABLE)
 
+        # Ship-to 행 찾기
         ship_to_row = -1
-        contact_row = -1
-        for row_i in range(table.RowCount):
+        for row_i in range(min(table.RowCount, 10)):
             try:
                 parvw = table.GetCell(row_i, 0).Text.strip()
+                if 'Ship' in parvw:
+                    ship_to_row = row_i
+                    break
             except Exception:
-                break  # 가시 범위 초과 시 중단
-            if 'Ship-to' in parvw:
-                ship_to_row = row_i
-            elif 'Contact' in parvw:
-                contact_row = row_i
+                break
 
-        def safe(row, col):
-            try:
-                return table.GetCell(row, col).Text.strip()
-            except Exception:
-                return ''
+        if ship_to_row < 0:
+            logger.warning("ZRMA: Ship-to 행 못 찾음")
+            session.findById("wnd[0]").sendVKey(3)
+            return result
 
-        if ship_to_row >= 0:
-            result['company'] = safe(ship_to_row, 4)   # NAME1
-            result['street']  = safe(ship_to_row, 5)   # STREET
-            postal = safe(ship_to_row, 6)               # POST_CODE1
-            city   = safe(ship_to_row, 7)               # CITY1
-            if postal or city:
-                result['street2'] = f"{postal} {city}".strip()
-
-        if contact_row >= 0:
-            result['customer'] = safe(contact_row, 4)  # 담당자명
-
-        # 전화번호: Ship-to 행에 포커스 → btnTEL 클릭 → 팝업
-        if ship_to_row >= 0:
-            try:
-                # GuiTableControl은 setCurrentCell 없음 → GetCell().setFocus() 사용
-                table.GetCell(ship_to_row, 4).setFocus()
-                time.sleep(0.3)
-                btn_tel = session.findById(
-                    "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD/tabpT\\07"
-                    "/ssubSUBSCREEN_BODY:SAPMV45A:4352"
-                    "/subSUBSCREEN_PARTNER_OVERVIEW:SAPLV09C:1000/btnTEL"
-                )
-                btn_tel.press()
-                time.sleep(1.5)
-                popup = session.findById("wnd[1]")
-                # TEL 팝업 구조 탐색 (여러 경로 시도)
-                phone_raw = ''
-                for fid in [
-                    "wnd[1]/usr/tblSAPLV09CGV_TC_TEL/txtGVS_TC_TEL-TELEPHONE[0,0]",
-                    "wnd[1]/usr/txtSZA1_D0100-TEL_NUMBER",
-                    "wnd[1]/usr/subGCS_ADDRESS:SAPLSZA1:0300/subCOUNTRY_SCREEN:SAPLSZA1:0301/txtSZA1_D0100-TEL_NUMBER",
-                ]:
-                    try:
-                        v = session.findById(fid).text.strip()
-                        if v:
-                            phone_raw = v
-                            break
-                    except Exception:
-                        pass
-                if phone_raw:
-                    result['phone'] = normalize_phone(phone_raw)
-                popup.sendVKey(12)
-                time.sleep(0.5)
-            except Exception as e:
-                logger.warning(f"ZRMA btnTEL 전화번호 실패: {e}")
-                try:
-                    session.findById("wnd[1]").sendVKey(12)
-                except Exception:
-                    pass
-
-        session.findById("wnd[0]").sendVKey(3)
+        # Ship-to 행 포커스 → btnDETAIL → SAPLSZA1 팝업
+        table.GetCell(ship_to_row, 1).setFocus()
         time.sleep(0.5)
-        logger.info(f"ZRMA Partners 주소 읽기: {result}")
-        return result
+        session.findById(_ZRMA_PARTNER_SUB + "/btnDETAIL").press()
+        time.sleep(1.5)
+
+        base = "wnd[1]/usr/subGCS_ADDRESS:SAPLSZA1:0300/subCOUNTRY_SCREEN:SAPLSZA1:0301"
+
+        def rf(*ids):
+            for fid in ids:
+                try:
+                    v = session.findById(fid).text.strip()
+                    if v:
+                        return v
+                except Exception:
+                    continue
+            return ''
+
+        phone_raw = rf(
+            f"{base}/txtSZA1_D0100-TEL_NUMBER",
+            f"{base}/txtSZA1_D0100-MOB_NUMBER",
+        )
+        result = {
+            'company':  rf(f"{base}/txtADDR1_DATA-NAME1"),
+            'customer': rf(f"{base}/txtADDR1_DATA-NAME2"),
+            'street':   rf(f"{base}/txtADDR1_DATA-STR_SUPPL1"),
+            'street2':  rf(f"{base}/txtADDR1_DATA-STR_SUPPL2"),
+            'phone':    normalize_phone(phone_raw),
+        }
+        logger.info(f"ZRMA 주소 읽기: {result}")
+
+        session.findById("wnd[1]").sendVKey(12)
+        time.sleep(0.5)
 
     except Exception as e:
         logger.warning(f"ZRMA Partners 접근 실패: {e}")
         try:
-            session.findById("wnd[0]").sendVKey(3)
+            session.findById("wnd[1]").sendVKey(12)
         except Exception:
             pass
 
-    # Fallback: 헤더 TXTPA
     try:
-        txtpa = session.findById(
-            "wnd[0]/usr/subSUBSCREEN_HEADER:SAPMV45A:4021"
-            "/subPART-SUB:SAPMV45A:4701/txtKUWEV-TXTPA"
-        ).text.strip()
-        if txtpa:
-            result['company'] = txtpa
-            logger.warning(f"ZRMA 주소 fallback(TXTPA): {txtpa}")
+        session.findById("wnd[0]").sendVKey(3)
+        time.sleep(0.5)
     except Exception:
         pass
 
