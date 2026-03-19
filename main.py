@@ -229,21 +229,81 @@ def _run_zrma(session, processed, variant, date_mode):
 
 
 TRIGGER_FILE = os.path.join(os.path.dirname(__file__), "run_now.flag")
+TRIGGER_FILES = {
+    i: os.path.join(os.path.dirname(__file__), f"run_now_{i}.flag")
+    for i in range(4)
+}
+
+
+def _run_session(sess_idx):
+    """개별 세션 단독 실행."""
+    processed = load_processed()
+    processed |= get_existing_order_numbers()
+    logger.info(f"=== 세션{sess_idx} 단독 실행 ===")
+    try:
+        if sess_idx == 0:
+            _run_vl06o(get_sap_session(0), processed)
+        elif sess_idx == 1:
+            _run_vl10g(get_sap_session(1), processed)
+        elif sess_idx == 2:
+            _run_zrma(get_sap_session(2), processed, variant='rlkr', date_mode='next_month')
+        elif sess_idx == 3:
+            _run_zrma(get_sap_session(3), processed, variant='q2', date_mode='year_end')
+    except ConnectionError as e:
+        logger.error(f"세션{sess_idx} 연결 실패: {e}")
+
+
+LUNCH_START = (11, 20)  # 11:20
+LUNCH_END   = (13, 20)  # 13:20
+
+
+def _is_lunch_break():
+    """평일 점심시간(11:20~13:20) 여부 확인."""
+    now = datetime.now()
+    if now.weekday() >= 5:  # 토/일 제외
+        return False
+    t = (now.hour, now.minute)
+    return LUNCH_START <= t < LUNCH_END
 
 
 def run_loop():
-    logger.info(f"자동화 시작 (간격: {REFRESH_INTERVAL_MINUTES}분)")
-    logger.info(f"수동 실행: 다른 터미널에서 'python sap_automation/now.py' 실행")
+    logger.info(f"자동화 시작 (간격: {REFRESH_INTERVAL_MINUTES}분, 점심 휴식: {LUNCH_START[0]:02d}:{LUNCH_START[1]:02d}~{LUNCH_END[0]:02d}:{LUNCH_END[1]:02d})")
+    logger.info(f"수동 실행: 다른 터미널에서 'python now.py' 실행")
     while True:
+        if _is_lunch_break():
+            logger.info("점심시간 — 실행 대기 중...")
+            # 점심 끝날 때까지 5초마다 대기 (수동 트리거는 허용)
+            while _is_lunch_break():
+                time.sleep(5)
+                if os.path.exists(TRIGGER_FILE):
+                    os.remove(TRIGGER_FILE)
+                    logger.info("▶ 점심 중 수동 전체 실행 트리거 감지 → 즉시 실행")
+                    run_once()
+                for sess_idx, flag_path in TRIGGER_FILES.items():
+                    if os.path.exists(flag_path):
+                        os.remove(flag_path)
+                        logger.info(f"▶ 점심 중 세션{sess_idx} 단독 실행 트리거 감지")
+                        _run_session(sess_idx)
+                        break
+            logger.info("점심시간 종료 → 재개")
+
         run_once()
-        logger.info(f"{REFRESH_INTERVAL_MINUTES}분 후 다음 실행... (수동: now.py)")
+        logger.info(f"{REFRESH_INTERVAL_MINUTES}분 후 다음 실행... (수동: now.py / now.py 0~3)")
         # 5초마다 trigger 파일 확인
         for _ in range(REFRESH_INTERVAL_MINUTES * 60 // 5):
             time.sleep(5)
+            # 전체 실행 트리거
             if os.path.exists(TRIGGER_FILE):
                 os.remove(TRIGGER_FILE)
-                logger.info("▶ 수동 실행 트리거 감지 → 즉시 실행")
+                logger.info("▶ 수동 전체 실행 트리거 감지 → 즉시 실행")
                 break
+            # 개별 세션 트리거
+            for sess_idx, flag_path in TRIGGER_FILES.items():
+                if os.path.exists(flag_path):
+                    os.remove(flag_path)
+                    logger.info(f"▶ 세션{sess_idx} 단독 실행 트리거 감지")
+                    _run_session(sess_idx)
+                    break
 
 
 if __name__ == "__main__":

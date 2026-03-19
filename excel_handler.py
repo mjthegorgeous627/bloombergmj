@@ -8,6 +8,8 @@ import re
 from datetime import datetime
 from config import EXCEL_PATH
 
+_DATE_RE = re.compile(r'(\d{1,2})월\s*(\d{1,2})일')
+
 
 def get_today_sheet_name():
     """시트명 형식: '3-17' (월-일)."""
@@ -35,54 +37,45 @@ def get_workbook():
 def find_today_section_end(ws):
     """
     오늘 날짜 섹션의 마지막 데이터 행 번호 반환.
-    xlwings Sheet 객체를 받아 처리.
+    구조: 시트 맨 위가 오늘 블록 (아주 가끔 전날 블록이 위에 있을 수 있음).
+    날짜 헤더 형식 무관: '3월 19일', '3월19일 목요일', '2026년 3월 19일' 모두 지원.
     """
     today = datetime.today()
-    today_pattern = f"{today.month}월 {today.day}일"
-    section_keywords = ["Scheduled", "Delayed", "Bloomberg", "Client"]
+    today_m = today.month
+    today_d = today.day
 
-    # 사용 중인 전체 범위
     used = ws.used_range
     max_row = used.last_cell.row
-    max_col = 8  # H열까지
+    max_col = 8
 
-    # 오늘 날짜 헤더 행 찾기
-    date_header_row = None
+    # G열(7열)에서 날짜 헤더 행 순서대로 수집
+    date_headers = []  # [(row, month, day), ...]
     for r in range(1, max_row + 1):
-        for c in range(1, max_col + 1):
-            val = ws.cells(r, c).value
-            if val and isinstance(val, str) and today_pattern in val:
-                date_header_row = r
-                break
-        if date_header_row:
+        val = ws.cells(r, 7).value
+        if val and isinstance(val, str):
+            m = _DATE_RE.search(val)
+            if m:
+                date_headers.append((r, int(m.group(1)), int(m.group(2))))
+
+    # 오늘 날짜 헤더 찾기
+    today_header_row = None
+    today_idx = None
+    for i, (r, mo, d) in enumerate(date_headers):
+        if mo == today_m and d == today_d:
+            today_header_row = r
+            today_idx = i
             break
 
-    if date_header_row is None:
+    if today_header_row is None:
         return max_row
 
-    # 다음 섹션 시작 행 찾기
-    next_section_row = None
-    for r in range(date_header_row + 2, max_row + 1):
-        for c in range(1, max_col + 1):
-            val = ws.cells(r, c).value
-            if val and isinstance(val, str):
-                if "년 " in val and "월 " in val and "일" in val and today_pattern not in val:
-                    next_section_row = r
-                    break
-                if any(kw in val for kw in section_keywords):
-                    next_section_row = r
-                    break
-        if next_section_row:
-            break
+    # 다음 날짜 헤더 행 (없으면 파일 끝 다음)
+    next_header_row = date_headers[today_idx + 1][0] if today_idx + 1 < len(date_headers) else max_row + 1
 
-    if next_section_row is None:
-        return max_row
-
-    # 마지막 데이터 행 (다음 섹션 직전)
-    last_data_row = date_header_row + 1
-    for r in range(date_header_row + 2, next_section_row):
-        row_has_data = any(ws.cells(r, c).value for c in range(1, max_col + 1))
-        if row_has_data:
+    # 오늘 섹션의 마지막 데이터 행
+    last_data_row = today_header_row + 1
+    for r in range(today_header_row + 2, next_header_row):
+        if any(ws.cells(r, c).value for c in range(1, max_col + 1)):
             last_data_row = r
 
     return last_data_row
@@ -175,8 +168,10 @@ def write_orders_to_excel(order_data_list):
     # E/F/G/H 열 병합 (같은 오더의 여러 행)
     if num_rows > 1:
         end_row = insert_at + num_rows - 1
+        wb.app.display_alerts = False
         for col in [5, 6, 7, 8]:  # E=담당자, F=전화, G=주소, H=메모
             ws.range(ws.cells(insert_at, col), ws.cells(end_row, col)).api.Merge()
+        wb.app.display_alerts = True
 
     # 모든 테두리 적용 (A~H, insert_at ~ insert_at+num_rows-1)
     border_range = ws.range(

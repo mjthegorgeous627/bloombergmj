@@ -45,7 +45,7 @@ def navigate_to_vl10g(session):
     - F8
     """
     logger.info("VL10G 진입 중...")
-    run_transaction(session, "VL10G")
+    run_transaction(session, "/nVL10G")
     time.sleep(1.5)
 
     # Shipping Point/Receiving Pt 입력
@@ -156,6 +156,42 @@ def build_blocked_order_row(orig_doc, doc_type, deliv_block, name1, error_msg):
     }]
 
 
+_BLOCK_FIELD_CANDIDATES = [
+    # ZRE (RMA Order) - 실제 확인된 경로
+    "wnd[0]/usr/tabsTAXI_TABSTRIP_OVERVIEW/tabpT\\01/ssubSUBSCREEN_BODY:SAPMV45A:4400/ssubHEADER_FRAME:SAPMV45A:4440/cmbVBAK-LIFSK",
+    # 일반 Sales Order 경로 (fallback)
+    "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD/tabpT\\01/ssubSUBSCREEN_BODY:SAPMV45A:4400/cmbVBAK-LIFSK",
+    "wnd[0]/usr/cmbVBAK-LIFSK",
+    "wnd[0]/usr/cmbVBAK-LIFSP",
+]
+
+
+def _try_release_block(session):
+    """ZS/ZZ Delivery Block 필드를 공백으로 변경. 반환: True(성공) / False(필드 없음)"""
+    # 아이템 테이블 선택 상태 해제 (setCurrentCell 후 헤더 필드가 read-only가 됨)
+    try:
+        session.findById("wnd[0]").sendVKey(0)  # Enter
+        time.sleep(0.3)
+    except Exception:
+        pass
+
+    # Sales 탭 선택
+    try:
+        session.findById("wnd[0]/usr/tabsTAXI_TABSTRIP_OVERVIEW/tabpT\\01").select()
+        time.sleep(0.5)
+    except Exception as e:
+        logger.warning(f"  Sales 탭 select 실패: {e}")
+
+    for fid in _BLOCK_FIELD_CANDIDATES:
+        try:
+            session.findById(fid).key = ""
+            logger.info(f"  블록 해제 성공: {fid.split('/')[-1]}")
+            return True
+        except Exception as e:
+            logger.warning(f"  후보 실패 {fid.split('/')[-1]}: {e}")
+    return False
+
+
 def release_delivery_block(session, grid_idx, orig_doc):
     """
     VL10G에서 ZZ/ZS Delivery Block 해제 시도.
@@ -187,32 +223,17 @@ def release_delivery_block(session, grid_idx, orig_doc):
             return False, msg
 
         # Delivery Block 필드 → 공백 선택
-        block_field_candidates = [
-            "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD/tabpT\\01/ssubSUBSCREEN_BODY:SAPMV45A:4400/cmbVBAK-LIFSK",
-            "wnd[0]/usr/cmbVBAK-LIFSK",
-            "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD/tabpT\\01/ssubSUBSCREEN_BODY:SAPMV45A:4400/cmbVBAK-LIFSP",
-            "wnd[0]/usr/cmbVBAK-LIFSP",
-        ]
-        cleared = False
-        for fid in block_field_candidates:
-            try:
-                field = session.findById(fid)
-                field.key = ""
-                logger.info(f"Delivery Block 공백 선택 ({fid})")
-                cleared = True
-                break
-            except Exception:
-                continue
-
-        if not cleared:
+        if not _try_release_block(session):
             msg = "Delivery Block 필드 찾기 실패"
             logger.warning(f"오더 {orig_doc}: {msg}")
             session.findById("wnd[0]").sendVKey(3)
             return False, msg
 
-        # 저장
+        # 저장 후 F3 복귀
         session.findById("wnd[0]").sendVKey(11)
         time.sleep(1.5)
+        session.findById("wnd[0]").sendVKey(3)
+        time.sleep(1)
         logger.info(f"오더 {orig_doc} Block 해제 저장 완료")
         return True, ''
 
@@ -226,33 +247,83 @@ def release_delivery_block(session, grid_idx, orig_doc):
         return False, msg
 
 
-def process_zre_with_block_release(session, grid_idx, orig_doc, order_type, name1):
+def _enter_zre_order(session, grid_idx, orig_doc):
     """
-    ZRE 회수 오더: VL10G 그리드에서 오더 진입 → 데이터 수집 → ZS/ZZ 블록 해제 → 저장.
-    한 번의 오더 진입으로 블록 해제와 데이터 수집을 동시에 처리.
-    반환: (True, [excel_rows]) | (False, 에러메시지)
+    ZRE 오더 진입: VL10G 그리드 클릭 → 실패시 VA02 fallback.
+    반환: ('grid'|'va02'|None, True|False)
     """
-    logger.info(f"ZRE 오더 {orig_doc} 진입 (블록 해제 + 데이터 수집)...")
+    # 1) 그리드 클릭 시도
     try:
-        # 오더 진입 (VL10G 그리드 OriginDoc 클릭)
         grid = session.findById(VL10G_GRID_PATH)
         grid.setCurrentCell(grid_idx, COL_ORIG_DOC)
         grid.clickCurrentCell()
         time.sleep(1.5)
-
         sbar_msg = _read_status_bar(session)
-        if sbar_msg:
-            logger.warning(f"오더 {orig_doc} 진입 실패: {sbar_msg}")
+        if not sbar_msg and not is_on_vl10g_list(session):
+            logger.info(f"  오더 {orig_doc} 그리드 클릭 진입 성공")
+            return 'grid', True
+        logger.warning(f"  그리드 클릭 진입 실패 (sbar='{sbar_msg}') → VA02 시도")
+        try:
             session.findById("wnd[0]").sendVKey(3)
-            return False, sbar_msg
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"  그리드 클릭 오류: {e} → VA02 시도")
 
-        if is_on_vl10g_list(session):
-            return False, "오더 진입 실패 (목록 화면 유지)"
+    # 2) VA02 fallback
+    try:
+        run_transaction(session, "VA02")
+        time.sleep(1)
+        session.findById("wnd[0]/usr/ctxtVBAK-VBELN").text = orig_doc
+        session.findById("wnd[0]").sendVKey(0)
+        time.sleep(1.5)
+        sbar_msg = _read_status_bar(session)
+        if not sbar_msg and not is_on_vl10g_list(session):
+            logger.info(f"  오더 {orig_doc} VA02 진입 성공")
+            return 'va02', True
+        logger.warning(f"  VA02 진입 실패: sbar='{sbar_msg}'")
+        try:
+            session.findById("wnd[0]").sendVKey(3)
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"  VA02 진입 오류: {e}")
 
+    return None, False
+
+
+def _back_to_vl10g(session, entry_method):
+    """오더 화면에서 VL10G 목록으로 복귀. /n으로 강제 이동해 팝업/중간화면 무시."""
+    try:
+        run_transaction(session, "/nVL10G")
+        time.sleep(1)
+        session.findById("wnd[0]/usr/ctxtST_VSTEL-LOW").text = "6507"
+        session.findById("wnd[0]/usr/ctxtST_LEDAT-HIGH").text = _end_of_next_month_str()
+        session.findById("wnd[0]").sendVKey(8)
+        time.sleep(2)
+        logger.info("  VL10G 목록 복귀 완료")
+    except Exception as e:
+        logger.warning(f"  VL10G 복귀 실패: {e}")
+
+
+def process_zre_with_block_release(session, grid_idx, orig_doc, order_type, name1):
+    """
+    ZRE 회수 오더: 오더 진입 → 데이터 수집 → ZS/ZZ 블록 해제 시도 → 저장.
+    - 블록 해제 실패해도 수집된 데이터는 반환 (메모에 [ZS미해제-수동확인] 표기)
+    - 그리드 클릭 진입 실패시 VA02 fallback
+    반환: (True, [excel_rows]) | (False, 에러메시지)
+    """
+    logger.info(f"ZRE 오더 {orig_doc} 진입 (데이터 수집 + ZS 해제 시도)...")
+
+    entry_method, entered = _enter_zre_order(session, grid_idx, orig_doc)
+    if not entered:
+        return False, "오더 진입 실패 (grid + VA02 모두 불가)"
+
+    try:
         title = session.findById("wnd[0]").Text
         logger.info(f"  오더 화면: {title}")
 
-        # 1. 주소 읽기 (Partners 탭)
+        # 1. 주소 읽기
         address = get_ship_to_address_zrma(session)
 
         # 2. 텍스트/메모 읽기
@@ -264,10 +335,10 @@ def process_zre_with_block_release(session, grid_idx, orig_doc, order_type, name
         if text_contact['found'] and not address.get('phone'):
             address['phone'] = text_contact['phone']
 
-        # 3. 아이템 읽기 (Item Overview 탭)
+        # 3. 아이템 읽기
         items = get_items_from_zrma_order(session, orig_doc, order_type)
 
-        # 4. S/N 수집 (회수 아이템: Extras > Technical objects)
+        # 4. S/N 수집
         if items:
             collect_serial_numbers(session, items)
 
@@ -278,31 +349,29 @@ def process_zre_with_block_release(session, grid_idx, orig_doc, order_type, name
             logger.warning(f"  아이템 없음 → fallback 행")
             excel_rows = build_blocked_order_row(orig_doc, order_type, 'ZS', name1, '아이템 없음')
 
-        # 6. ZS/ZZ 블록 해제
-        block_field_candidates = [
-            "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD/tabpT\\01/ssubSUBSCREEN_BODY:SAPMV45A:4400/cmbVBAK-LIFSK",
-            "wnd[0]/usr/cmbVBAK-LIFSK",
-            "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD/tabpT\\01/ssubSUBSCREEN_BODY:SAPMV45A:4400/cmbVBAK-LIFSP",
-            "wnd[0]/usr/cmbVBAK-LIFSP",
-        ]
-        for fid in block_field_candidates:
-            try:
-                session.findById(fid).key = ""
-                logger.info(f"  블록 해제: {fid}")
-                break
-            except Exception:
-                continue
+        # 6. ZS/ZZ 블록 해제 시도
+        block_released = _try_release_block(session)
 
-        # 7. 저장
-        session.findById("wnd[0]").sendVKey(11)
-        time.sleep(1.5)
-        logger.info(f"  오더 {orig_doc} 저장 완료")
+        if block_released:
+            # 저장 후 복귀
+            session.findById("wnd[0]").sendVKey(11)
+            time.sleep(1.5)
+            logger.info(f"  오더 {orig_doc} ZS 해제 + 저장 완료")
+            _back_to_vl10g(session, entry_method)
+        else:
+            # 해제 실패 → 저장 없이 복귀, 메모에 수동 확인 표기
+            logger.warning(f"  오더 {orig_doc} ZS 해제 불가 → 데이터만 수집")
+            for row in excel_rows:
+                existing = row.get('memo', '')
+                row['memo'] = ("[ZS미해제-수동확인]\n" + existing).strip() if existing else "[ZS미해제-수동확인]"
+            _back_to_vl10g(session, entry_method)
+
         return True, excel_rows
 
     except Exception as e:
         logger.error(f"ZRE 오더 {orig_doc} 처리 실패: {e}")
         try:
-            session.findById("wnd[0]").sendVKey(3)
+            _back_to_vl10g(session, entry_method)
         except Exception:
             pass
         return False, str(e)
