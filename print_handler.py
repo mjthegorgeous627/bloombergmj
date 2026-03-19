@@ -52,7 +52,8 @@ def _find_section_range(ws, header_row, all_headers):
     """
     header_row 기준 묶음의 (시작행, 끝행) 반환.
     - 시작: header_row (날짜 헤더 행 포함)
-    - 끝: 다음 날짜 헤더 행 직전의 마지막 데이터행
+    - 끝: 빈 행(A~H 모두 비어있음) 직전 또는 다음 날짜 헤더 직전
+    빈 행은 섹션 구분자로 처리하여 Scheduled/Delayed 등 다른 묶음 포함 방지.
     """
     max_row = ws.used_range.last_cell.row
 
@@ -65,11 +66,12 @@ def _find_section_range(ws, header_row, all_headers):
 
     limit = (next_header_row - 1) if next_header_row else max_row
 
-    # limit 이전 빈 행 제거: 마지막으로 데이터가 있는 행
     end_row = header_row
     for r in range(header_row + 1, limit + 1):
-        if any(ws.cells(r, c).value for c in range(1, 9)):  # A~H 중 하나라도 값 있으면
+        if any(ws.cells(r, c).value for c in range(1, 9)):
             end_row = r
+        else:
+            break  # 빈 행 = 섹션 구분자 → 중단
 
     return header_row, end_row
 
