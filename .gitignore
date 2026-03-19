@@ -4,3 +4,5 @@ __pycache__/
 automation.log
 processed_orders.json
 credentials.py
+kakao_tokens.json
+test_kakao.py

@@ -184,20 +184,55 @@ def write_orders_to_excel(order_data_list):
 
     # 저장
     wb.save()
-    print(f"[Excel] {num_rows}개 행 삽입 완료 → {ws.name} 시트 행 {insert_at}~{insert_at + num_rows - 1}")
-    return True
+    end_row = insert_at + num_rows - 1
+    print(f"[Excel] {num_rows}개 행 삽입 완료 → {ws.name} 시트 행 {insert_at}~{end_row}")
+    return ws, insert_at, end_row
 
 
-def get_existing_order_numbers():
+def write_kakao_sent(ws, start_row, end_row):
+    """
+    J열에 카톡 전송 시각 기록.
+    여러 행이면 병합해서 한 칸에 표시.
+    프린트 범위(A~H)에 포함되지 않아 인쇄에 영향 없음.
+    """
+    timestamp = datetime.now().strftime('카톡 ✓ %y.%m.%d %H:%M')
+    wb = ws.book
+    if end_row > start_row:
+        wb.app.display_alerts = False
+        ws.range(ws.cells(start_row, 10), ws.cells(end_row, 10)).api.Merge()
+        wb.app.display_alerts = True
+    cell = ws.cells(start_row, 10)
+    cell.value = timestamp
+    cell.api.WrapText = True
+    wb.save()
+    print(f"[Excel] J열 카톡 전송 기록: {timestamp}")
+
+
+def _is_recent_sheet(sheet_name, days=90):
+    """시트명(M-D 형식)이 최근 N일 내인지 확인."""
+    try:
+        m, d = map(int, sheet_name.split('-'))
+        today = datetime.today()
+        sheet_date = datetime(today.year, m, d)
+        if sheet_date > today:
+            sheet_date = datetime(today.year - 1, m, d)
+        return (today - sheet_date).days <= days
+    except Exception:
+        return False
+
+
+def get_existing_order_numbers(days=45):
     """
     Excel 파일의 A열(Order #)에서 이미 입력된 오더번호(7자리 이상 숫자) 추출.
-    processed_orders.json 초기화용으로 사용.
+    최근 N일 시트만 스캔하여 성능 최적화.
     """
     found = set()
     num_re = re.compile(r'\b(\d{7,})\b')
     try:
         wb = openpyxl.load_workbook(EXCEL_PATH, read_only=True, data_only=True)
         for sname in wb.sheetnames:
+            if not _is_recent_sheet(sname, days=days):
+                continue
             ws = wb[sname]
             for row in ws.iter_rows(min_col=1, max_col=1, values_only=True):
                 val = row[0]

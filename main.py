@@ -19,7 +19,7 @@ import logging
 from datetime import datetime
 
 from config import REFRESH_INTERVAL_MINUTES, LOG_FILE
-from order_tracker import load_processed, mark_processed, save_processed
+from order_tracker import load_processed, mark_processed, save_processed, purge_old_processed
 from sap_handler import (
     get_sap_session,
     navigate_to_vl06o_list,
@@ -41,7 +41,8 @@ from vl10g_handler import (
     refresh_vl10g,
     process_vl10g,
 )
-from excel_handler import write_orders_to_excel, get_existing_order_numbers
+from excel_handler import write_orders_to_excel, write_kakao_sent, get_existing_order_numbers
+from kakao_handler import send_kakao_order
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,9 +55,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _write_and_notify(rows, order_id, processed):
+    """Excel 기록 → 카카오 전송 → J열 기록 → processed 저장."""
+    result = write_orders_to_excel(rows)
+    if result:
+        ws, start_row, end_row = result
+        try:
+            ok = send_kakao_order(rows)
+            if ok:
+                write_kakao_sent(ws, start_row, end_row)
+                logger.info(f"카카오 전송 완료 ({order_id})")
+            else:
+                logger.warning(f"카카오 전송 실패 ({order_id}): send_kakao_order returned False")
+        except Exception as e:
+            logger.warning(f"카카오 전송 예외 ({order_id}): {e}")
+    mark_processed(order_id, processed)
+    save_processed(processed)
+
+
 def run_once(excel_only=False):
     logger.info("=" * 55)
     logger.info(f"실행 시작: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    purged = purge_old_processed()
+    if purged:
+        logger.info(f"오래된 오더 {purged}개 자동 삭제 (45일 초과)")
 
     # excel_only=True: Excel 기록만 기준 (JSON 무시) → 누락 오더 재처리용
     if excel_only:
@@ -65,11 +87,13 @@ def run_once(excel_only=False):
         logger.info(f"[catchup] Excel 기준 {len(processed)}개 오더만 기처리로 간주")
     else:
         processed = load_processed()
-        excel_existing = get_existing_order_numbers()
-        if excel_existing - processed:
-            logger.info(f"Excel 기존 오더 {len(excel_existing)}개 → processed에 추가")
-            processed = processed | excel_existing
-            save_processed(processed)
+        # JSON이 비어있을 때만 Excel 스캔 (JSON 초기화/삭제 복구용)
+        if not processed:
+            excel_existing = get_existing_order_numbers()
+            if excel_existing:
+                logger.info(f"JSON 비어있음 → Excel에서 {len(excel_existing)}개 오더 복구")
+                processed = excel_existing
+                save_processed(processed)
 
     # ── 세션0: VL06O ────────────────────────────────────────
     try:
@@ -137,9 +161,7 @@ def _run_vl06o(session, processed):
     results = process_new_orders(session, new_orders, order_map)
     for ebeln, rows in results.items():
         try:
-            write_orders_to_excel(rows)
-            mark_processed(ebeln, processed)
-            save_processed(processed)
+            _write_and_notify(rows, ebeln, processed)
             logger.info(f"VL06O 오더 {ebeln} Excel 기록 완료 ({len(rows)}행)")
         except Exception as e:
             logger.error(f"VL06O 오더 {ebeln} Excel 기록 실패: {e}", exc_info=True)
@@ -161,9 +183,7 @@ def _run_vl10g(session, processed):
     # Block 해제 불가 오더 → Excel에 오더번호/회사명/에러 기록
     for order_num, rows in result['blocked_excel_rows'].items():
         try:
-            write_orders_to_excel(rows)
-            mark_processed(order_num, processed)
-            save_processed(processed)
+            _write_and_notify(rows, order_num, processed)
             logger.info(f"VL10G Block 오더 {order_num} Excel 기록 완료")
         except Exception as e:
             logger.error(f"VL10G Block 오더 {order_num} 기록 실패: {e}")
@@ -175,9 +195,7 @@ def _run_vl10g(session, processed):
     for order_num, rows in result['zre_orders'].items():
         if rows:
             try:
-                write_orders_to_excel(rows)
-                mark_processed(order_num, processed)
-                save_processed(processed)
+                _write_and_notify(rows, order_num, processed)
                 logger.info(f"ZRE 오더 {order_num} Excel 기록 완료")
             except Exception as e:
                 logger.error(f"ZRE 오더 {order_num} 기록 실패: {e}")
@@ -219,9 +237,7 @@ def _run_zrma(session, processed, variant, date_mode):
     results = process_zrma_orders(session, new_orders, order_map)
     for order_num, rows in results.items():
         try:
-            write_orders_to_excel(rows)
-            mark_processed(order_num, processed)
-            save_processed(processed)
+            _write_and_notify(rows, order_num, processed)
             logger.info(f"ZRMA 오더 {order_num} Excel 기록 완료 ({len(rows)}행)")
         except Exception as e:
             logger.error(f"ZRMA 오더 {order_num} Excel 기록 실패: {e}", exc_info=True)
@@ -237,8 +253,8 @@ TRIGGER_FILES = {
 
 def _run_session(sess_idx):
     """개별 세션 단독 실행."""
+    purge_old_processed()
     processed = load_processed()
-    processed |= get_existing_order_numbers()
     logger.info(f"=== 세션{sess_idx} 단독 실행 ===")
     try:
         if sess_idx == 0:
@@ -311,5 +327,19 @@ if __name__ == "__main__":
         run_once(excel_only=True)
     elif "--once" in sys.argv:
         run_once()
+    elif "--print-afternoon" in sys.argv:
+        from print_handler import print_afternoon
+        print_afternoon()
+    elif "--print-tomorrow" in sys.argv:
+        from print_handler import print_tomorrow
+        print_tomorrow()
+    elif "--quick" in sys.argv:
+        idx = sys.argv.index("--quick")
+        if idx + 1 < len(sys.argv):
+            from quick_handler import run_quick
+            run_quick(sys.argv[idx + 1])
+        else:
+            print("사용법: python main.py --quick [오더번호]")
+            print("예시:   python main.py --quick 7780226")
     else:
         run_loop()

@@ -298,6 +298,7 @@ def _back_to_vl10g(session, entry_method):
         run_transaction(session, "/nVL10G")
         time.sleep(1)
         session.findById("wnd[0]/usr/ctxtST_VSTEL-LOW").text = "6507"
+        session.findById("wnd[0]/usr/ctxtST_LEDAT-LOW").text = ""
         session.findById("wnd[0]/usr/ctxtST_LEDAT-HIGH").text = _end_of_next_month_str()
         session.findById("wnd[0]").sendVKey(8)
         time.sleep(2)
