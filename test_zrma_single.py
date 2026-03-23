@@ -8,10 +8,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
                     handlers=[logging.StreamHandler(sys.stdout)])
 
 from sap_handler import get_sap_session, get_ship_to_address_zrma, get_text_content, parse_extra_orders, parse_contact_from_text, parse_memo_for_display, ZRMA_MENU_TEXTS
-from zrma_handler import get_all_rows_from_zrma, group_zrma_by_order, navigate_to_zrma_order, get_items_from_zrma_order, build_excel_rows_zrma
+from zrma_handler import get_all_rows_from_zrma, group_zrma_by_order, navigate_to_zrma_order, get_items_from_zrma_order, collect_serial_numbers, build_excel_rows_zrma
 from excel_handler import write_orders_to_excel
 
-TARGET = '66999156'
+TARGET = sys.argv[1] if len(sys.argv) > 1 else '66999156'
 
 session = get_sap_session(2)
 print(f"화면: {session.findById('wnd[0]').Text}")
@@ -55,6 +55,12 @@ if not items:
     print("[ERROR] 아이템 없음")
     session.findById("wnd[0]").sendVKey(3)
     sys.exit(1)
+
+# 회수 아이템 S/N 수집
+collect_serial_numbers(session, items)
+print("\nS/N 수집 후 아이템:")
+for it in items:
+    print(f"  {it.get('prefix')} {it.get('arktx')} → S/N: {it.get('serial_numbers')}")
 
 # Excel 행 생성
 excel_rows = build_excel_rows_zrma(items, address, extra_orders, memo)
