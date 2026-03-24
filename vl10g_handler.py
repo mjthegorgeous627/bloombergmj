@@ -309,7 +309,7 @@ def _back_to_vl10g(session, entry_method):
 
 def process_zre_with_block_release(session, grid_idx, orig_doc, order_type, name1):
     """
-    ZRE 회수 오더: 오더 진입 → 데이터 수집 → ZS/ZZ 블록 해제 시도 → 저장.
+    ZRE 회수 오더 (ZZ/ZS 블록 있는 것): 오더 진입 → 데이터 수집 → ZS/ZZ 해제 → 저장.
     - 블록 해제 실패해도 수집된 데이터는 반환 (메모에 [ZS미해제-수동확인] 표기)
     - 그리드 클릭 진입 실패시 VA02 fallback
     반환: (True, [excel_rows]) | (False, 에러메시지)
@@ -354,13 +354,11 @@ def process_zre_with_block_release(session, grid_idx, orig_doc, order_type, name
         block_released = _try_release_block(session)
 
         if block_released:
-            # 저장 후 복귀
             session.findById("wnd[0]").sendVKey(11)
             time.sleep(1.5)
             logger.info(f"  오더 {orig_doc} ZS 해제 + 저장 완료")
             _back_to_vl10g(session, entry_method)
         else:
-            # 해제 실패 → 저장 없이 복귀, 메모에 수동 확인 표기
             logger.warning(f"  오더 {orig_doc} ZS 해제 불가 → 데이터만 수집")
             for row in excel_rows:
                 existing = row.get('memo', '')
@@ -463,10 +461,9 @@ def process_vl10g(session, processed):
             refresh_vl10g(session)
             rows = get_all_rows_from_vl10g(session)
 
-        # ── ZRE (블록 없음): 추후 처리 ──────────────────────────────────
+        # ── ZRE (블록 없음) → ZRMA_Q에서 수집하므로 스킵 ───────────────
         if doc_type == 'ZRE':
-            logger.info(f"ZRE 회수 오더 {orig_doc} (블록 없음) - 추후 처리")
-            result['zre_orders'][orig_doc] = []
+            logger.info(f"ZRE 오더 {orig_doc} (블록 없음) → ZRMA_Q 담당, 스킵")
         else:
             # 배송 오더 → Background VL06O 이관 (현재 홀드)
             logger.info(f"오더 {orig_doc} VL06O 이관 홀드 (스킵)")

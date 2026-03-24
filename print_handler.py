@@ -116,11 +116,20 @@ def _print_section(wb, ws, start_row, end_row):
     ps.PrintArea = f"$A${start_row}:$H${end_row}"
 
     # 페이지 설정
-    ps.Orientation = 2      # xlLandscape (가로)
-    ps.PaperSize = 9        # xlPaperA4
-    ps.Zoom = False
-    ps.FitToPagesWide = 1
-    ps.FitToPagesTall = 1
+    try:
+        ps.Orientation = 2      # xlLandscape (가로)
+    except Exception:
+        pass
+    try:
+        ps.PaperSize = 9        # xlPaperA4
+    except Exception:
+        pass
+    try:
+        ps.Zoom = False
+        ps.FitToPagesWide = 1
+        ps.FitToPagesTall = 1
+    except Exception:
+        pass
 
     # 흑백 시도 (PageSetup.BlackAndWhite: 셀 색상 무시하고 흑백 출력)
     bw_set = False

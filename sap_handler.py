@@ -80,11 +80,14 @@ def navigate_to_vl06o_list(session):
             # 선택화면 → F8로 실행
             logger.info("선택화면 → F8 실행")
             session.findById("wnd[0]").sendVKey(8)
+            time.sleep(2)
         else:
-            # 목록화면 → F5 새로고침
-            logger.info("이미 목록 화면 - F5 새로고침")
-            session.findById("wnd[0]").sendVKey(5)
-        time.sleep(2)
+            # 목록화면 → F3으로 선택화면 복귀 → F8 재실행 (DB 재조회)
+            logger.info("목록화면 → F3 복귀 → F8 재실행 (DB 재조회)")
+            session.findById("wnd[0]").sendVKey(3)
+            time.sleep(1.5)
+            session.findById("wnd[0]").sendVKey(8)
+            time.sleep(3)
         return
 
     logger.info("VL06O 진입 중...")

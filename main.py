@@ -170,10 +170,8 @@ def _run_vl06o(session, processed):
 def _run_vl10g(session, processed):
     """VL10G: Block 해제 + VL06O 이관 + ZRE 수집."""
     try:
-        if not is_on_vl10g_list(session):
-            navigate_to_vl10g(session)
-        else:
-            refresh_vl10g(session)
+        # 항상 재실행 (F8) → DB 재조회로 새 오더 반영
+        navigate_to_vl10g(session)
     except Exception as e:
         logger.error(f"VL10G 이동 실패: {e}")
         return
@@ -207,10 +205,8 @@ def _run_zrma(session, processed, variant, date_mode):
         if not is_on_zrma_list(session):
             navigate_to_zrma_q(session, variant, date_mode)
         else:
-            try:
-                refresh_zrma_list(session)
-            except Exception:
-                logger.info(f"ZRMA_Q ({variant}) 새로고침 스킵 (현재 화면 사용)")
+            # 이미 목록 화면 → F3 복귀 + F8 재실행으로 DB 재조회
+            refresh_zrma_list(session)
     except Exception as e:
         logger.error(f"ZRMA_Q ({variant}) 이동 실패: {e}")
         return

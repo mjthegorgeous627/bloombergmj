@@ -10,7 +10,7 @@ import win32print
 
 PRINTER_NAME = "ZDesigner GK420t"
 
-# 203 DPI: 8cm=640dots, 5cm=400dots
+# 203 DPI: 8cm(가로)=640dots, 5cm(세로)=400dots  — 가로 라벨
 LABEL_WIDTH  = 640
 LABEL_HEIGHT = 400
 
@@ -58,51 +58,67 @@ def _wrap_text(text, max_chars):
 
 def build_zpl_label(qr_data, name, company):
     """
-    QR데이터 + 이름 + 회사명 → 8cm×5cm 라벨 ZPL 문자열 생성.
+    QR데이터 + 이름 + 회사명 → 8cm×5cm 가로 라벨 ZPL 생성.
 
-    레이아웃 (이미지 기준):
-      ┌─────────────┬──────────────┐
-      │             │  NAME        │
-      │   QR CODE   │              │
-      │             │  COMPANY     │
-      └─────────────┴──────────────┘
+    레이아웃 (겹침 없음):
+      ┌──────────┬──────────────────┐
+      │          │                  │
+      │ QR CODE  │  NAME            │
+      │  (좌측)  │  COMPANY         │
+      │          │                  │
+      └──────────┴──────────────────┘
+    203 DPI: 8cm=640dots(가로), 5cm=400dots(세로)
+    QR mag 5 → 최대 245dots (세로 400 안에 안전)
+    텍스트 영역: x=270 고정 → QR과 겹침 불가
     """
-    # 텍스트 영역: x=310~630 (약 320dots 폭)
-    # 글자 너비 26 기준 → 최대 12자 → 단어 줄바꿈
-    MAX_CHARS   = 9
-    TEXT_X      = 315
+    # QR: 좌측 고정
+    # mag 7: version6(41*7=287), version8(49*7=343) → 400 세로 안전
+    QR_MAG = 7
+    QR_X   = 10
+    QR_Y   = 10
 
-    FONT_H_NAME = 68   # 이름 폰트 높이 (dots)
-    FONT_W_NAME = 34   # 이름 폰트 너비 (dots)
-    FONT_H_CO   = 56   # 회사명 폰트 높이 (dots)
-    FONT_W_CO   = 28   # 회사명 폰트 너비 (dots)
-    LINE_GAP    = 10   # 줄 간격
+    # 텍스트: QR 추정 끝(~300) ~ 라벨 끝(630) 중앙 → x≈465
+    # x=400 시작, 사용 가능 폭: 640-400-10 = 230 dots
+    TEXT_X    = 400
 
-    name_lines = _wrap_text(name, MAX_CHARS)
-    co_lines   = _wrap_text(company, MAX_CHARS)
+    # 이름: 한 줄 유지
+    # 230dots / 20per char = 11자
+    NAME_MAX_CHARS = 25
+    FONT_H_NAME    = 52
+    FONT_W_NAME    = 20
 
-    # 텍스트 블록 총 높이 → 수직 중앙 정렬
+    # 회사: 최대 2줄
+    CO_MAX_CHARS = 13
+    FONT_H_CO    = 44
+    FONT_W_CO    = 17
+
+    LINE_GAP = 12
+
+    name_lines = _wrap_text(name, NAME_MAX_CHARS)[:1]   # 강제 1줄
+    co_lines   = _wrap_text(company, CO_MAX_CHARS)[:2]  # 최대 2줄
+
+    # 텍스트 블록 수직 중앙 정렬
     total_h = (
         len(name_lines) * (FONT_H_NAME + LINE_GAP) +
-        (12 if name_lines and co_lines else 0) +  # 이름-회사 간격
+        (14 if name_lines and co_lines else 0) +
         len(co_lines) * (FONT_H_CO + LINE_GAP)
     )
-    y = max(15, (LABEL_HEIGHT - total_h) // 2)
+    y = max(20, (LABEL_HEIGHT - total_h) // 2)
 
     lines = [
         "^XA",
         f"^PW{LABEL_WIDTH}",
         f"^LL{LABEL_HEIGHT}",
         "^LH0,0",
-        "^CI28",            # UTF-8
+        "^CI28",
 
         # QR 코드 (좌측)
-        "^FO15,15",
-        "^BQN,2,10",        # QR code, normal, magnification 10
+        f"^FO{QR_X},{QR_Y}",
+        f"^BQN,2,{QR_MAG}",
         f"^FDQA,{qr_data}^FS",
     ]
 
-    # 이름
+    # 이름 (우측)
     for line in name_lines:
         lines += [
             f"^FO{TEXT_X},{y}",
@@ -111,11 +127,10 @@ def build_zpl_label(qr_data, name, company):
         ]
         y += FONT_H_NAME + LINE_GAP
 
-    # 이름-회사 간격
     if name_lines and co_lines:
-        y += 12
+        y += 14
 
-    # 회사명
+    # 회사명 (우측)
     for line in co_lines:
         lines += [
             f"^FO{TEXT_X},{y}",
@@ -156,6 +171,88 @@ def print_zpl(zpl_string, printer_name=PRINTER_NAME):
         return False
     finally:
         win32print.ClosePrinter(h)
+
+
+# ── PDF 라벨 파싱 (Bloomberg .ZPL 파일은 실제 PDF) ───────────────────────────
+
+def parse_pdf_label(pdf_path):
+    """
+    Bloomberg 포털에서 다운로드된 .ZPL 파일(실제 PDF) 파싱.
+    반환: {'qr_data': '...', 'name': '...', 'company': '...', 'phone': '...'}
+
+    Bloomberg 라벨 구조 (PDF 좌표 기준):
+      - QR 코드: 상단 (x≈231, y≈705 in PDF coords)
+      - Ship To 데이터: 하단 좌측 (x≈68, y≈360~432 in PDF coords)
+        → PyMuPDF 좌표 (y=0 상단): y≈359~432
+    """
+    import fitz
+    from pyzbar.pyzbar import decode as pyzbar_decode
+    from PIL import Image
+
+    result = {'qr_data': '', 'name': '', 'company': '', 'phone': ''}
+    try:
+        doc = fitz.open(pdf_path)
+        page = doc[0]
+
+        # 1. QR 코드 디코딩: 3x 확대 렌더링 → pyzbar
+        mat = fitz.Matrix(3, 3)
+        pix = page.get_pixmap(matrix=mat)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        for d in pyzbar_decode(img):
+            if d.type == 'QRCODE':
+                result['qr_data'] = d.data.decode('utf-8', errors='replace')
+                break
+
+        # 2. Ship To 텍스트 파싱
+        # Bloomberg 라벨: Ship To 데이터는 x≈68~310, y≈345~450 (PyMuPDF 좌표)
+        # "Ship To:" 레이블(x≈17)은 clip으로 제외
+        clip = fitz.Rect(60, 345, 310, 450)
+        section = page.get_text("text", clip=clip, sort=True)
+        lines = [l.strip() for l in section.splitlines() if l.strip()]
+
+        if lines:
+            result['name'] = lines[0]
+        if len(lines) > 1:
+            result['phone'] = lines[1]
+        if len(lines) > 2:
+            result['company'] = lines[2]
+
+        # 폴백: 좌표로 못 찾으면 "Ship To:" 마커 기반 파싱
+        if not result['name']:
+            _parse_pdf_ship_to_fallback(page, result)
+
+        doc.close()
+    except Exception as e:
+        logger.error(f"PDF 파싱 실패 ({pdf_path}): {e}")
+
+    return result
+
+
+def _parse_pdf_ship_to_fallback(page, result):
+    """전체 텍스트에서 'Ship To:' 마커 이후 섹션 파싱."""
+    full = page.get_text("text", sort=True)
+    lines = [l.strip() for l in full.splitlines() if l.strip()]
+    for i, line in enumerate(lines):
+        if line == "Ship To:":
+            after = lines[i + 1:]
+            if after:
+                result['name'] = after[0]
+            if len(after) > 1:
+                result['phone'] = after[1]
+            if len(after) > 2:
+                result['company'] = after[2]
+            return
+    # 마지막 폴백: 전화번호 패턴으로 위치 추정
+    import re
+    phone_re = re.compile(r'^\+\d[\d\-]{8,}$')
+    for i, line in enumerate(lines):
+        if phone_re.match(line):
+            if i > 0:
+                result['name'] = lines[i - 1]
+            result['phone'] = line
+            if i + 1 < len(lines):
+                result['company'] = lines[i + 1]
+            break
 
 
 # ── 공개 함수 ────────────────────────────────────────────────────────────────

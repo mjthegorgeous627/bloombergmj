@@ -37,8 +37,9 @@ def get_workbook():
 def find_today_section_end(ws):
     """
     오늘 날짜 섹션의 마지막 데이터 행 번호 반환.
-    구조: 시트 맨 위가 오늘 블록 (아주 가끔 전날 블록이 위에 있을 수 있음).
-    날짜 헤더 형식 무관: '3월 19일', '3월19일 목요일', '2026년 3월 19일' 모두 지원.
+    - 날짜 헤더: G열에 '3월 19일', '3월19일 목요일', '2026년 3월 19일' 등
+    - 오후 섹션: '3월 23일 오후' 처럼 오후 명시 시 해당 섹션을 우선 사용
+    - 'Client/Bloomberg - Scheduled' 병합 행 이전까지만 스캔
     """
     today = datetime.today()
     today_m = today.month
@@ -48,35 +49,57 @@ def find_today_section_end(ws):
     max_row = used.last_cell.row
     max_col = 8
 
-    # G열(7열)에서 날짜 헤더 행 순서대로 수집
-    date_headers = []  # [(row, month, day), ...]
+    # 'Scheduled' 병합 행 경계 먼저 탐지 (Client/Bloomberg scheduled 구분선)
+    scheduled_boundary = max_row + 1
     for r in range(1, max_row + 1):
+        try:
+            if ws.cells(r, 1).api.MergeCells:
+                val = ws.cells(r, 1).value
+                if val and isinstance(val, str) and 'scheduled' in val.lower():
+                    scheduled_boundary = r
+                    break
+        except Exception:
+            pass
+
+    # G열(7열)에서 날짜 헤더 행 수집 (scheduled 경계 이전만)
+    date_headers = []  # [(row, month, day), ...]
+    for r in range(1, scheduled_boundary):
         val = ws.cells(r, 7).value
         if val and isinstance(val, str):
             m = _DATE_RE.search(val)
             if m:
                 date_headers.append((r, int(m.group(1)), int(m.group(2))))
 
-    # 오늘 날짜 헤더 찾기
+    # 오늘 날짜 헤더 찾기 (마지막 매칭 사용 → 오후 섹션이 있으면 오후 우선)
     today_header_row = None
     today_idx = None
     for i, (r, mo, d) in enumerate(date_headers):
         if mo == today_m and d == today_d:
             today_header_row = r
-            today_idx = i
-            break
+            today_idx = i  # break하지 않음 → 마지막 매칭 사용
 
     if today_header_row is None:
-        return max_row
+        return scheduled_boundary - 1
 
-    # 다음 날짜 헤더 행 (없으면 파일 끝 다음)
-    next_header_row = date_headers[today_idx + 1][0] if today_idx + 1 < len(date_headers) else max_row + 1
+    # 다음 경계: 다른 날짜 헤더 또는 scheduled 경계
+    next_boundary = scheduled_boundary
+    for j in range(today_idx + 1, len(date_headers)):
+        nr, nmo, nd = date_headers[j]
+        if nmo != today_m or nd != today_d:
+            next_boundary = nr
+            break
 
-    # 오늘 섹션의 마지막 데이터 행
+    # 오늘 섹션의 마지막 데이터 행 (연속 빈 행 3개 이상이면 종료)
     last_data_row = today_header_row + 1
-    for r in range(today_header_row + 2, next_header_row):
+    consecutive_empty = 0
+    for r in range(today_header_row + 2, next_boundary):
         if any(ws.cells(r, c).value for c in range(1, max_col + 1)):
             last_data_row = r
+            consecutive_empty = 0
+        else:
+            consecutive_empty += 1
+            if consecutive_empty >= 3:
+                break
 
     return last_data_row
 
@@ -112,6 +135,9 @@ def write_orders_to_excel(order_data_list):
     # 행 삽입: 한 행씩 삽입 (안정적)
     for _ in range(num_rows):
         ws.range(f"A{insert_at}:H{insert_at}").api.EntireRow.Insert()
+
+    # 삽입된 행 배경색 흰색으로 초기화 (이전 행 서식 상속 방지)
+    ws.range(ws.cells(insert_at, 1), ws.cells(insert_at + num_rows - 1, 8)).color = (255, 255, 255)
 
     # 데이터 입력
     for idx, item in enumerate(order_data_list):
