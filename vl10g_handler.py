@@ -39,11 +39,18 @@ def _end_of_next_month_str():
 def navigate_to_vl10g(session):
     """
     VL10G 진입:
-    - Shipping Point: 6507
-    - Deliv. Creation Date from: 공백
-    - Deliv. Creation Date to: 다음달 말일
-    - F8
+    - 이미 목록 화면이면 F3 복귀 + F8 재실행 (DB 재조회)
+    - 아니면 /nVL10G + 조건 입력 + F8
     """
+    if is_on_vl10g_list(session):
+        logger.info("VL10G 이미 목록 화면 → F3 복귀 + F8 재실행 (DB 재조회)")
+        session.findById("wnd[0]").sendVKey(3)  # F3 = Back
+        time.sleep(1.5)
+        session.findById("wnd[0]").sendVKey(8)  # F8 = Execute
+        time.sleep(2)
+        logger.info("VL10G F3+F8 재실행 완료")
+        return
+
     logger.info("VL10G 진입 중...")
     run_transaction(session, "/nVL10G")
     time.sleep(1.5)
@@ -78,7 +85,10 @@ def is_on_vl10g_list(session):
 
 
 def refresh_vl10g(session):
-    session.findById("wnd[0]").sendVKey(5)
+    """F3으로 선택화면 복귀 → F8 재실행 (DB 재조회)."""
+    session.findById("wnd[0]").sendVKey(3)  # F3 = Back
+    time.sleep(1.5)
+    session.findById("wnd[0]").sendVKey(8)  # F8 = Execute
     time.sleep(2)
 
 

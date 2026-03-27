@@ -59,19 +59,23 @@ def print_nlbl(filepath, copies=1):
     # 파일 로딩 대기 (새로 열었으면 더 기다림)
     time.sleep(3 if not already_open else 1.5)
 
-    # 창 활성화
+    # 창 활성화 (SetForegroundWindow로 실제 포커스 확보)
     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    win32gui.BringWindowToTop(hwnd)
+    # Windows foreground lock 우회: Alt 키 선입력 후 SetForegroundWindow
     win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
     win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-    time.sleep(0.3)
+    win32gui.SetForegroundWindow(hwnd)
+    time.sleep(0.5)
 
-    # Ctrl+P를 copies만큼 반복 (다이얼로그 없이 바로 출력됨)
+    # Ctrl+P → 다이얼로그 대기 → Enter로 확인
     for i in range(copies):
         win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
         win32api.keybd_event(ord('P'), 0, 0, 0)
         win32api.keybd_event(ord('P'), 0, win32con.KEYEVENTF_KEYUP, 0)
         win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+        time.sleep(1.5)  # 인쇄 다이얼로그 뜰 때까지 대기
+        win32api.keybd_event(win32con.VK_RETURN, 0, 0, 0)
+        win32api.keybd_event(win32con.VK_RETURN, 0, win32con.KEYEVENTF_KEYUP, 0)
         time.sleep(0.5)
 
     time.sleep(1.5)

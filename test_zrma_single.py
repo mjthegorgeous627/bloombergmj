@@ -13,15 +13,27 @@ from excel_handler import write_orders_to_excel
 
 TARGET = sys.argv[1] if len(sys.argv) > 1 else '66999156'
 
-session = get_sap_session(2)
-print(f"화면: {session.findById('wnd[0]').Text}")
+# 세션 1, 2, 3 중에서 TARGET 오더가 있는 세션 자동 탐색
+session = None
+order_map = {}
+for sess_idx in (1, 2, 3):
+    try:
+        s = get_sap_session(sess_idx)
+        print(f"세션{sess_idx} 화면: {s.findById('wnd[0]').Text}")
+        rows = get_all_rows_from_zrma(s)
+        omap = group_zrma_by_order(rows)
+        if TARGET in omap:
+            print(f"→ 세션{sess_idx}에서 {TARGET} 발견")
+            session = s
+            order_map = omap
+            break
+        else:
+            print(f"  세션{sess_idx} 목록: {list(omap.keys())}")
+    except Exception as e:
+        print(f"  세션{sess_idx} 연결 실패: {e}")
 
-# 목록에서 해당 오더 찾기
-rows = get_all_rows_from_zrma(session)
-order_map = group_zrma_by_order(rows)
-
-if TARGET not in order_map:
-    print(f"[ERROR] {TARGET} 목록에 없음. 현재 오더: {list(order_map.keys())}")
+if session is None:
+    print(f"[ERROR] {TARGET} 세션 1~3 어디에도 없음")
     sys.exit(1)
 
 info = order_map[TARGET]

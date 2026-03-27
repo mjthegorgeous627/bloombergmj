@@ -498,8 +498,9 @@ def _open_new_session(session):
         time.sleep(2)
         sap = win32com.client.GetObject("SAPGUI")
         conn = sap.GetScriptingEngine.Children(0)
-        new_sess = conn.Children(conn.Count - 1)
-        logger.info(f"새 SAP 세션 생성 완료 (세션{conn.Count - 1})")
+        count = conn.Children.Count
+        new_sess = conn.Children(count - 1)
+        logger.info(f"새 SAP 세션 생성 완료 (세션{count - 1})")
         return new_sess
     except Exception as e:
         logger.error(f"새 SAP 세션 생성 실패: {e}")
@@ -518,91 +519,80 @@ def _close_session(sess):
 def collect_serial_numbers(session, items):
     """
     RETURN 아이템(Bunit 제외)의 S/N을 수집.
-    새 SAP 세션에서 VA02를 열어 Technical objects 접근.
-    원본 ZRMA_Q 세션(session)은 그대로 유지.
+    원본 ZRMA_Q 세션(session)에서 직접 Technical objects에 접근.
+    수동 흐름과 동일: ZRMA 오더 뷰 → 행 선택 → Extras > Technical objects → S/N 읽기 → 팝업 닫기.
     """
     needs = [it for it in items if it.get('serial_numbers') is None]
     if not needs:
         return
 
     order_num = needs[0]['order_num']
-    logger.info(f"  VA02 새 세션으로 S/N 수집: 오더 {order_num}")
+    logger.info(f"  S/N 수집 (원본 세션): 오더 {order_num}")
 
-    va02 = _open_new_session(session)
-    if not va02:
-        for item in needs:
-            item['serial_numbers'] = ['X']
-        return
-
-    try:
-        # VA02 열기
-        run_transaction(va02, "VA02")
-        time.sleep(1)
-        va02.findById("wnd[0]/usr/ctxtVBAK-VBELN").text = order_num
-        va02.findById("wnd[0]").sendVKey(0)
-        time.sleep(1.5)
-
-        # Item Overview 탭
+    for item in needs:
+        row_i = item['table_row_i']
+        logger.info(f"  S/N 수집: [{item['arktx']}] (행 {row_i})")
         try:
-            va02.findById(
-                "wnd[0]/usr/tabsTAXI_TABSTRIP_OVERVIEW/tabpT\\01"
-            ).select()
-            time.sleep(0.5)
-        except Exception:
-            pass
-
-        for item in needs:
-            row_i = item['table_row_i']
-            logger.info(f"  S/N 수집: [{item['arktx']}] (행 {row_i})")
-            try:
-                table = va02.findById(ZRMA_ITEMS_TABLE_PATH)
-                table.GetCell(row_i, 0).setFocus()
-                time.sleep(0.3)
-
-                va02.findById(EXTRAS_TECH_OBJ).select()
-                time.sleep(1.5)
-
-                # 팝업 확인
+            table = session.findById(ZRMA_ITEMS_TABLE_PATH)
+            # 행 구조 탐색 (최초 1회만)
+            if row_i == needs[0]['table_row_i']:
                 try:
-                    popup = va02.findById("wnd[1]")
-                    logger.info(f"    팝업 제목: '{popup.Text}'")
-                    try:
-                        usr = va02.findById("wnd[1]/usr")
-                        for ci in range(min(usr.Children.Count, 8)):
-                            child = usr.Children.ElementAt(ci)
-                            txt = ''
-                            try:
-                                txt = child.Text
-                            except Exception:
-                                pass
-                            logger.info(f"    wnd[1]/usr 하위[{ci}]: id={child.Id}  type={child.Type}  text='{txt}'")
-                    except Exception:
-                        pass
-
-                    if popup.Text == "Information":
-                        logger.info("    Information 팝업 → Enter로 닫기")
-                        popup.sendVKey(0)
-                        time.sleep(1.0)
-                except Exception:
-                    logger.warning("    팝업(wnd[1]) 없음")
-
-                sn_list = _read_serial_numbers_from_popup(va02)
-                logger.info(f"    → S/N: {sn_list if sn_list else '없음(X)'}")
-                item['serial_numbers'] = sn_list if sn_list else ['X']
-
+                    row_obj = table.rows.elementAt(row_i)
+                    logger.info(f"    row type={row_obj.Type}  selected={row_obj.selected}")
+                    for ci in range(min(row_obj.Children.Count, 6)):
+                        cell = row_obj.Children.ElementAt(ci)
+                        txt = ''
+                        try:
+                            txt = cell.Text
+                        except Exception:
+                            pass
+                        logger.info(f"    row.Children[{ci}]: id={cell.Id}  type={cell.Type}  text='{txt}'")
+                except Exception as e:
+                    logger.info(f"    row 탐색 실패: {e}")
+            table.GetCell(row_i, 0).setFocus()
+            time.sleep(0.3)
+            try:
+                table.rows.elementAt(row_i).selected = True
+                logger.info(f"    행 {row_i} 선택 완료")
             except Exception as e:
-                logger.warning(f"  S/N 수집 실패 (행 {row_i}): {e}")
-                item['serial_numbers'] = ['X']
-            finally:
-                _close_tech_obj_popup(va02)
+                logger.warning(f"    행 선택 실패 (setFocus만 적용): {e}")
 
-    except Exception as e:
-        logger.error(f"  VA02 S/N 수집 오류: {e}")
-        for item in needs:
-            if item.get('serial_numbers') is None:
-                item['serial_numbers'] = ['X']
-    finally:
-        _close_session(va02)
+            session.findById(EXTRAS_TECH_OBJ).select()
+            time.sleep(1.5)
+
+            # 팝업 확인
+            try:
+                popup = session.findById("wnd[1]")
+                logger.info(f"    팝업 제목: '{popup.Text}'")
+                # tbar 버튼 목록 로깅
+                try:
+                    tbar = session.findById("wnd[1]/tbar[0]")
+                    for bi in range(tbar.Children.Count):
+                        btn = tbar.Children.ElementAt(bi)
+                        tooltip = ''
+                        try:
+                            tooltip = btn.Tooltip
+                        except Exception:
+                            pass
+                        logger.info(f"    tbar[0] 버튼[{bi}]: id={btn.Id}  type={btn.Type}  tooltip='{tooltip}'")
+                except Exception as e:
+                    logger.info(f"    tbar[0] 없음: {e}")
+                if popup.Text == "Information":
+                    logger.info("    Information 팝업 → Enter로 닫기")
+                    popup.sendVKey(0)
+                    time.sleep(1.5)
+            except Exception:
+                logger.warning("    팝업(wnd[1]) 없음")
+
+            sn_list = _read_serial_numbers_from_popup(session)
+            logger.info(f"    → S/N: {sn_list if sn_list else '없음(X)'}")
+            item['serial_numbers'] = sn_list if sn_list else ['X']
+
+        except Exception as e:
+            logger.warning(f"  S/N 수집 실패 (행 {row_i}): {e}")
+            item['serial_numbers'] = ['X']
+        finally:
+            _close_tech_obj_popup(session)
 
 
 def navigate_to_zrma_order(session, grid_idx):

@@ -1,32 +1,6 @@
 =============================================
   SAP 실행 방법
-=============================================
-
-
-
-─────────────────────────────────────────
-■ 아침 시작 (모든 창 끄고 새로 시작)
-─────────────────────────────────────────
-
-PowerShell 열고 아래 명령어만 실행:
-
-   cd C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation
-
-   python startup.py
-
-   → SAP 자동 실행 + 로그인
-   → 세션 4개 자동 설정 (VL06O / VL10G / ZRMA RLKR / ZRMA Q2)
-   → Excel 자동 열기
-   → 누락 오더 catchup
-   → 20분 자동 반복
-
-   ※ SAP / Excel 수동으로 미리 열 필요 없음
-   ※  python main.py 는 SAP가 이미 켜진 상태일 때만 사용
-
-
-─────────────────────────────────────────
-■ 한눈에 요약
-─────────────────────────────────────────
+============================================
 
 cd C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation
 
@@ -61,10 +35,6 @@ cd C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation
 ■ 수동으로 즉시 실행 (main.py 돌아가는 중)
 ─────────────────────────────────────────
 
-   새 PowerShell 창에서:
-
-   cd C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation
-
    python now.py      → 전체 4개 세션 실행
    python now.py 0    → 세션0 VL06O만
    python now.py 1    → 세션1 VL10G만
@@ -93,9 +63,6 @@ cd C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation
 ■ Zebra 라벨 출력 (Bloomberg 배송 라벨)
 ─────────────────────────────────────────
 
-   새 PowerShell 창에서:
-
-   cd C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation
 
    【방법 1】 파일 직접 — 포털에서 이미 다운로드한 경우
    ─────────────────────────────────────
@@ -105,6 +72,7 @@ cd C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation
    python print_zpl_file.py "C:\Users\bloomberg\Downloads\SHIPLABEL_1 - 2026-03-23T140743.617.ZPL"
       → 경로 직접 지정해서 출력
 
+
    【방법 2】 오더번호 지정 — 포털 자동 접속해서 라벨 받아 출력
    ─────────────────────────────────────
    python portal_handler.py --order 9123456789
@@ -113,9 +81,6 @@ cd C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation
    python portal_handler.py --order 9123456789 --force
       → 이미 출력했던 번호도 강제 재출력
 
-   ※ 포털 로그인 세션 자동 재사용 (portal_session.json)
-   ※ 세션 만료 시 브라우저 창에서 로그인 후 Enter 누르면 계속 진행
-   ※ 출력 이력: portal_printed.json (중복 방지)
 
    【방법 3】 KB Spare / KB5 Spare 용지 출력
    ─────────────────────────────────────
@@ -127,23 +92,3 @@ cd C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation
    ※ ZebraDesigner가 이미 열려있어도 동작 (새 인스턴스 불필요)
    ※ 창이 최소화된 채 실행 → 출력 완료 후 자동 닫힘
 
-
-─────────────────────────────────────────
-■ 카카오톡 자동 전송 (나에게 보내기)
-─────────────────────────────────────────
-
-   ※ 별도 명령어 없음 — python main.py 실행 중 새 오더가 Excel에 기록될 때 자동 전송
-   ※ PC 카카오톡 앱 안 켜도 됨. 비용 없음.
-   ※ 전송 후 J열에 "카톡 ✓ 26.03.19 14:32" 자동 기록됨
-   ※ 프린트 범위(A~H)에 J열 포함 안 됨
-
-   전송 형식 예시:
-     [키보드 교체]
-     배송 키보드5 10063421
-     회수 일반키보드 10045196
-     CHULMIN KANG / 02-2004-9908
-     SHINYOUNG SECURITIES CO LTD 34-8 YOIDO-DONG
-
-   ────────────────────────────────────────
-
-=============================================
