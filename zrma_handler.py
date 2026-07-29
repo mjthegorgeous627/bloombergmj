@@ -10,6 +10,8 @@ import calendar
 
 from sap_handler import (
     run_transaction,
+    refresh_sap_list,
+    get_scripting_engine,
     get_ship_to_address_zrma,
     get_text_content,
     parse_extra_orders,
@@ -31,11 +33,12 @@ ZRMA_ITEMS_TABLE_PATH = (
     "/tblSAPMV45ATCTRL_U_ERF_AUFTRAG"
 )
 
-# Extras > Technical objects 메뉴 (menu[3]=Extras, menu[7]=Technical objects)
-EXTRAS_TECH_OBJ = "wnd[0]/mbar/menu[3]/menu[7]"
+# Extras > Technical objects 메뉴 (menu[3]=Extras, menu[9]=Technical objects)
+EXTRAS_TECH_OBJ = "wnd[0]/mbar/menu[3]/menu[9]"
 
 # Maintain/Display Serial Numbers 팝업 — GuiTableControl 경로 후보
 _SN_TABLE_IDS = [
+    "wnd[1]/usr/tblSAPLIPW1TC_SERIAL_NUMBERS",
     "wnd[1]/usr/tblSAPLAQSE_TC_SERIAL",
     "wnd[1]/usr/tblSAPLAQS1TC_SERIAL",
     "wnd[1]/usr/sub0001/tblSAPLAQSE_TC_SERIAL",
@@ -64,14 +67,14 @@ def _end_of_year_str():
     return date(date.today().year, 12, 31).strftime('%m/%d/%Y')
 
 
-def navigate_to_zrma_q(session, variant, date_mode='next_month'):
+def navigate_to_zrma_q(session, variant, date_mode='next_month', apply_layout=False):
     """
     ZRMA_Q 진입.
     variant: 'rlkr' 또는 'q2'
     date_mode: 'next_month' (RLKR) 또는 'year_end' (Q2)
     """
     logger.info(f"ZRMA_Q 진입 중 (variant={variant})...")
-    run_transaction(session, "ZRMA_Q")
+    run_transaction(session, "/nZRMA_Q")
     time.sleep(1.5)
 
     # Get Variants 버튼 클릭 (tbar[1]/btn[17] = Shift+F5)
@@ -109,64 +112,246 @@ def navigate_to_zrma_q(session, variant, date_mode='next_month'):
     time.sleep(2)
 
     # 레이아웃 /6507 PETER 적용
-    _apply_layout(session)
+    if apply_layout:
+        _apply_layout(session)
+    else:
+        logger.info("ZRMA_Q layout apply skipped")
     logger.info(f"ZRMA_Q ({variant}) 준비 완료")
 
 
+def _iter_layout_popup_grids(session):
+    """Choose Layout 팝업 안의 GridView/Shell 컨트롤을 경로 고정 없이 찾는다."""
+    explicit_ids = [
+        "wnd[1]/usr/subSUB_CONFIGURATION:SAPLSALV_CUL_LAYOUT_CHOOSE:0500/cntlD500_CONTAINER/shellcont/shell",
+        "wnd[1]/usr/cntlGRID1/shellcont/shell",
+        "wnd[1]/usr/cntlALV_GRID/shellcont/shell",
+        "wnd[1]/usr/cntlCONTAINER/shellcont/shell",
+        "wnd[1]/usr/cntlGRID/shellcont/shell",
+    ]
+    seen = set()
+    for elem_id in explicit_ids:
+        try:
+            obj = session.findById(elem_id)
+            seen.add(obj.Id)
+            yield obj
+        except Exception:
+            pass
+
+    try:
+        root = session.findById("wnd[1]/usr")
+    except Exception:
+        return
+
+    def walk(obj):
+        try:
+            children = obj.Children
+            count = children.Count
+        except Exception:
+            return
+        for i in range(count):
+            try:
+                child = children(i)
+            except Exception:
+                continue
+            child_id = getattr(child, 'Id', '')
+            child_type = getattr(child, 'Type', '')
+            child_text = str(getattr(child, 'Text', '') or '')
+            if child_id not in seen and (child_type == 'GuiShell' or 'GridView' in child_text):
+                seen.add(child_id)
+                yield child
+            yield from walk(child)
+
+    yield from walk(root)
+
+
+def _read_layout_popup_rows(session):
+    """Choose Layout 팝업의 행 텍스트를 최대한 여러 방식으로 읽는다."""
+    column_candidates = (
+        "LAYOUT", "VARIANT", "TEXT", "DESCRIPT", "LTDX", "REPORT",
+        "S_LAYOUT", "VARIANT_TEXT", "COLTEXT", "SCRTEXT_L",
+    )
+
+    for pg in _iter_layout_popup_grids(session):
+        row_count = int(getattr(pg, 'RowCount', 0) or getattr(pg, 'VisibleRowCount', 0) or 0)
+        logger.info(f"ZRMA_Q layout popup control found: {getattr(pg, 'Id', '')}, rows={row_count}")
+
+        columns = list(column_candidates)
+        try:
+            for i in range(30):
+                try:
+                    col = pg.ColumnOrder(i)
+                except Exception:
+                    try:
+                        col = pg.ColumnOrder[i]
+                    except Exception:
+                        break
+                if col and col not in columns:
+                    columns.insert(0, col)
+        except Exception:
+            pass
+
+        for row_i in range(row_count):
+            parts = []
+            hit_col = columns[0] if columns else 0
+            for col in columns:
+                try:
+                    value = str(pg.GetCellValue(row_i, col)).strip()
+                except Exception:
+                    try:
+                        value = str(pg.GetCell(row_i, col).Text).strip()
+                    except Exception:
+                        continue
+                if value:
+                    parts.append(value)
+                    hit_col = col
+            row_text = " ".join(parts)
+            if row_text:
+                yield pg, row_i, hit_col, row_text
+
+def _press_layout_popup_ok(session):
+    for btn_id in ["wnd[1]/tbar[0]/btn[0]", "wnd[1]/usr/btnSPOP-OPTION1", "wnd[1]/usr/btnBUTTON_1"]:
+        try:
+            session.findById(btn_id).press()
+            time.sleep(1)
+            return True
+        except Exception:
+            continue
+    try:
+        session.findById("wnd[1]").sendVKey(0)
+        time.sleep(1)
+        return True
+    except Exception:
+        return False
+
+
+
+def _select_second_layout_row_fallback(session):
+    """텍스트 읽기가 실패하면 팝업 GridView의 두 번째 행(/6507 PETER)을 직접 선택한다."""
+    for grid in _iter_layout_popup_grids(session):
+        try:
+            row_count = int(getattr(grid, 'RowCount', 0) or getattr(grid, 'VisibleRowCount', 0) or 0)
+            if row_count < 2:
+                continue
+
+            col = None
+            try:
+                col = grid.ColumnOrder(0)
+            except Exception:
+                try:
+                    col = grid.ColumnOrder[0]
+                except Exception:
+                    pass
+
+            try:
+                grid.selectedRows = "1"
+            except Exception:
+                pass
+            if col:
+                try:
+                    grid.setCurrentCell(1, col)
+                except Exception:
+                    pass
+
+            try:
+                grid.doubleClickCurrentCell()
+                time.sleep(1)
+                logger.info(f"레이아웃 /6507 PETER 적용 완료 (grid row fallback: {getattr(grid, 'Id', '')})")
+                return True
+            except Exception:
+                if _press_layout_popup_ok(session):
+                    logger.info(f"레이아웃 /6507 PETER 적용 완료 (grid ok fallback: {getattr(grid, 'Id', '')})")
+                    return True
+        except Exception as e:
+            logger.debug(f"layout grid fallback failed: {e}")
+
+    logger.warning("레이아웃 /6507 PETER fallback 선택 실패")
+    return False
+
 def _apply_layout(session):
-    """Manage Layouts → Choose Layouts → /6507 PETER 더블클릭."""
+    """ALV Choose Layout 팝업에서 /6507 PETER를 선택한다."""
+    target_keys = ("/6507", "PETER", "Q2 6507")
     try:
         grid = session.findById(ZRMA_GRID_PATH)
         grid.pressToolbarContextButton("&MB_VARIANT")
         time.sleep(0.5)
-        grid.selectContextMenuItem("&LOAD_VARIANT")
-        time.sleep(1)
-        # 팝업에서 /6507 PETER 찾아 더블클릭
-        # TODO: 팝업 구조 확인 후 업데이트
-        popup_grid_candidates = [
-            "wnd[1]/usr/cntlGRID1/shellcont/shell",
-            "wnd[1]/usr/cntlALV_GRID/shellcont/shell",
-        ]
-        for pgid in popup_grid_candidates:
+
+        menu_opened = False
+        for menu_id in ("&LOAD", "&LOAD_VARIANT"):
             try:
-                pg = session.findById(pgid)
-                for row_i in range(pg.RowCount):
-                    try:
-                        val = pg.GetCellValue(row_i, pg.ColumnOrder[0])
-                        if "/6507" in str(val) or "PETER" in str(val):
-                            pg.setCurrentCell(row_i, pg.ColumnOrder[0])
-                            pg.doubleClickCurrentCell()
-                            time.sleep(1)
-                            logger.info("레이아웃 /6507 PETER 적용 완료")
-                            return
-                    except Exception:
-                        continue
-            except Exception:
-                continue
-        logger.warning("레이아웃 /6507 PETER 자동 선택 실패 (수동 필요)")
+                grid.selectContextMenuItem(menu_id)
+                menu_opened = True
+                logger.info(f"ZRMA_Q layout menu opened ({menu_id})")
+                break
+            except Exception as e:
+                logger.debug(f"ZRMA_Q layout menu id failed ({menu_id}): {e}")
+        if not menu_opened:
+            logger.warning("ZRMA_Q layout menu open failed")
+            return False
+
+        time.sleep(1)
+        seen_rows = []
+        for popup_grid, row_i, hit_col, row_text in _read_layout_popup_rows(session):
+            seen_rows.append(row_text)
+            upper_text = row_text.upper()
+            if any(key in upper_text for key in target_keys):
+                try:
+                    popup_grid.setCurrentCell(row_i, hit_col)
+                except Exception:
+                    pass
+                try:
+                    popup_grid.selectedRows = str(row_i)
+                except Exception:
+                    pass
+                try:
+                    popup_grid.doubleClickCurrentCell()
+                    time.sleep(1)
+                except Exception:
+                    _press_layout_popup_ok(session)
+                logger.info(f"레이아웃 /6507 PETER 적용 완료: {row_text}")
+                return True
+
+        logger.warning(f"레이아웃 /6507 PETER 자동 선택 실패. 보이는 행: {seen_rows[:8]}")
+        return _select_second_layout_row_fallback(session)
     except Exception as e:
         logger.warning(f"레이아웃 적용 실패: {e}")
-
+        return False
 
 def is_on_zrma_list(session):
     """ZRMA_Q 목록 화면인지 확인."""
     try:
         title = session.findById("wnd[0]").Text
-        return "ZRMA" in title.upper() or "RMA" in title.upper()
+        if "RMA LIST" not in title.upper():
+            return False
+        session.findById(ZRMA_GRID_PATH)
+        return True
     except Exception:
         return False
 
 
 def refresh_zrma_list(session):
-    """F3으로 선택화면 복귀 → F8 재실행 (DB 재조회)."""
-    session.findById("wnd[0]").sendVKey(3)   # F3 = Back
-    time.sleep(1.5)
-    title = session.findById("wnd[0]").Text
-    logger.info(f"ZRMA_Q F3 후 화면: '{title}'")
-    session.findById("wnd[0]").sendVKey(8)   # F8 = Execute (sendVKey로 통일)
-    time.sleep(2)
-    logger.info("ZRMA_Q F3+F8 재실행 완료")
+    """20분 루프용 ZRMA_Q 재조회. 레이아웃 창을 다시 열지 않는다."""
+    try:
+        session.findById(ZRMA_GRID_PATH)
+    except Exception:
+        logger.warning("ZRMA_Q 목록 그리드가 없어 재조회 실패")
+        return False
 
+    if refresh_sap_list(session, ZRMA_GRID_PATH, "ZRMA_Q", try_f5=False, toolbar_button_id="REF"):
+        return True
+
+    logger.info("ZRMA_Q 일반 Refresh 불가 → F3/F8 재조회 시도")
+    try:
+        session.findById("wnd[0]").sendVKey(3)
+        time.sleep(1.5)
+        logger.info(f"ZRMA_Q F3 후 화면: '{session.findById('wnd[0]').Text}'")
+        session.findById("wnd[0]").sendVKey(8)
+        time.sleep(2)
+        session.findById(ZRMA_GRID_PATH)
+        logger.info("ZRMA_Q F3/F8 재조회 완료")
+        return True
+    except Exception as e:
+        logger.warning(f"ZRMA_Q F3/F8 재조회 실패: {e}")
+        return False
 
 def get_all_rows_from_zrma(session):
     """
@@ -325,7 +510,7 @@ def open_order_via_va02(session, order_num):
     """VA02로 오더 직접 열기. 성공 시 True 반환."""
     from sap_handler import run_transaction
     try:
-        run_transaction(session, "VA02")
+        run_transaction(session, "/nVA02")
         time.sleep(1)
         session.findById("wnd[0]/usr/ctxtVBAK-VBELN").text = order_num
         session.findById("wnd[0]").sendVKey(0)
@@ -447,7 +632,10 @@ def _read_serial_numbers_from_popup(session):
                     try:
                         sn = tbl.GetCell(i, "SERNR").Text.strip()
                     except Exception:
-                        sn = tbl.GetCell(i, 0).Text.strip()
+                        try:
+                            sn = tbl.GetCell(i, "RIPW0-SERNR").Text.strip()
+                        except Exception:
+                            sn = tbl.GetCell(i, 0).Text.strip()
                     if sn and sn not in sn_list:
                         sn_list.append(sn)
                 except Exception:
@@ -493,11 +681,9 @@ def _read_serial_numbers_from_popup(session):
 def _open_new_session(session):
     """현재 세션에서 새 SAP 세션 생성 후 반환. 실패 시 None."""
     try:
-        import win32com.client
         session.createSession()
         time.sleep(2)
-        sap = win32com.client.GetObject("SAPGUI")
-        conn = sap.GetScriptingEngine.Children(0)
+        conn = get_scripting_engine().Children(0)
         count = conn.Children.Count
         new_sess = conn.Children(count - 1)
         logger.info(f"새 SAP 세션 생성 완료 (세션{count - 1})")
@@ -529,13 +715,20 @@ def collect_serial_numbers(session, items):
     order_num = needs[0]['order_num']
     logger.info(f"  S/N 수집 (원본 세션): 오더 {order_num}")
 
-    for item in needs:
+    for idx, item in enumerate(needs):
         row_i = item['table_row_i']
-        logger.info(f"  S/N 수집: [{item['arktx']}] (행 {row_i})")
+        scroll_top = item.get('table_scroll_top', 0)
+        logger.info(f"  S/N 수집: [{item['arktx']}] (행 {row_i}, 스크롤 {scroll_top})")
         try:
             table = session.findById(ZRMA_ITEMS_TABLE_PATH)
+            try:
+                if table.VerticalScrollbar.Position != scroll_top:
+                    table.VerticalScrollbar.Position = scroll_top
+                    time.sleep(0.2)
+            except Exception as e:
+                logger.warning(f"    스크롤 복원 실패 (top={scroll_top}): {e}")
             # 행 구조 탐색 (최초 1회만)
-            if row_i == needs[0]['table_row_i']:
+            if idx == 0:
                 try:
                     row_obj = table.rows.elementAt(row_i)
                     logger.info(f"    row type={row_obj.Type}  selected={row_obj.selected}")
@@ -604,10 +797,33 @@ def navigate_to_zrma_order(session, grid_idx):
         grid.doubleClickCurrentCell()
         time.sleep(2)
         logger.info(f"ZRMA 오더 진입 (행 {grid_idx})")
+        try:
+            logger.info(f"  오더 진입 후 화면: {session.findById('wnd[0]').Text}")
+        except Exception:
+            pass
         return True
     except Exception as e:
         logger.error(f"ZRMA 오더 진입 실패: {e}")
         return False
+
+
+
+def _is_numeric_material(matnr):
+    """Excel 반영 대상 material: 숫자로만 된 material number."""
+    value = str(matnr or '').strip()
+    return bool(value) and value.isdigit()
+
+
+# PC/모니터/키보드/서버/라우터는 매번 나가는 정규 배송품이라 수량이 많아도
+# 유닛마다 시리얼 번호를 따로 입력해야 해서 절대 한 줄(Qty: N)로 합치면 안
+# 된다 (사용자 확인, 2026-07-29). 그 외 가끔 나가는 이벤트성 물품만 수량이
+# 많고(qty>10) 시리얼이 없을 때 한 줄로 합친다 (기존 로직 유지).
+_ALWAYS_SERIALIZED_KEYWORDS = ('PC', 'MONITOR', 'KEYBOARD', 'SERVER', 'ROUTER')
+
+
+def _is_always_serialized_item(arktx):
+    text = str(arktx or '').upper()
+    return any(re.search(rf'\b{kw}\b', text) for kw in _ALWAYS_SERIALIZED_KEYWORDS)
 
 
 def get_items_from_zrma_order(session, order_num, order_type):
@@ -619,76 +835,146 @@ def get_items_from_zrma_order(session, order_num, order_type):
             'matnr': '...', 'arktx': '...', 'qty': 1}, ...]
     """
     items = []
+    table_id = (
+        "wnd[0]/usr/tabsTAXI_TABSTRIP_OVERVIEW/tabpT\\01"
+        "/ssubSUBSCREEN_BODY:SAPMV45A:4400"
+        "/subSUBSCREEN_TC:SAPMV45A:4900"
+        "/tblSAPMV45ATCTRL_U_ERF_AUFTRAG"
+    )
     try:
-        table = session.findById(
-            "wnd[0]/usr/tabsTAXI_TABSTRIP_OVERVIEW/tabpT\\01"
-            "/ssubSUBSCREEN_BODY:SAPMV45A:4400"
-            "/subSUBSCREEN_TC:SAPMV45A:4900"
-            "/tblSAPMV45ATCTRL_U_ERF_AUFTRAG"
-        )
+        table = session.findById(table_id)
 
         # GuiTableControl: 컬럼 인덱스로 접근
         # 0=POSNR, 1=MABNR(Material), 2=ARKTX(Desc), 3=KWMENG(Qty), 12=ROUTE
-        row_count = table.RowCount
+        #
+        # 주의 (7825897로 실측 확인, 2026-07-29): table.RowCount는 "화면에
+        # 보이는 행 수"가 아니라 전체 아이템 개수(예: 13)를 반환하는데,
+        # GetCell(i, ...)은 그 중 실제로 화면에 그려진 상대 인덱스(0~약3)만
+        # 읽을 수 있고 그 이상은 COM 예외("invalid argument")가 난다. RowCount를
+        # 페이지당 반복 횟수로 쓰면 인덱스 4 근처에서 예외가 나 "다 읽었다"고
+        # 착각하고 스크롤 시도조차 못 해보고 멈춘다 - 그래서 화면보다 많은
+        # 아이템(BOM 하위 구성품 등)이 조용히 누락됐다. FirstVisibleRow 속성은
+        # 이 컨트롤엔 아예 없다(AttributeError) - VerticalScrollbar가 유일한
+        # 스크롤 수단이고, 한 페이지에 실제로 몇 줄이 보이는지는 GetCell이
+        # 예외를 낼 때까지 직접 세어봐야 한다.
+        #
+        # 그리고 스크롤(=서버 왕복) 직후에는 예전 table/scrollbar COM 참조가
+        # stale해져서 GetCell(0,..)조차 바로 예외를 낸다 (Position 세팅 성공,
+        # 경고 없이 조용히 페이지가 비어있는 것처럼 보임) - 그래서 스크롤할
+        # 때마다 session.findById로 table을 다시 잡는다.
+        try:
+            scrollbar = table.VerticalScrollbar
+            scroll_max = int(scrollbar.Maximum)
+        except Exception:
+            scrollbar = None
+            scroll_max = 0
 
-        for i in range(row_count):
-            # GetCell(i,0) 실패 = 가시 범위 초과 → 루프 종료
-            try:
-                item_no = table.GetCell(i, 0).Text.strip()
-            except Exception:
-                break
+        seen_item_nos = set()
+        scroll_top = 0
+        max_pages = 50  # 안전장치: 스크롤이 안 멈추는 이상 상황 방지
 
-            # 빈 행 또는 개괄명(00) 제외
-            if not item_no or item_no.endswith('00') or item_no == '000000':
-                continue
-
-            try:
-                matnr   = table.GetCell(i, 1).Text.strip()
-                arktx   = table.GetCell(i, 2).Text.strip()
-                qty_str = table.GetCell(i, 3).Text.strip()
+        for _page in range(max_pages):
+            if scrollbar is not None and scroll_top > 0:
                 try:
-                    route = table.GetCell(i, 12).Text.strip()
+                    scrollbar.Position = scroll_top
+                    time.sleep(0.3)
+                    table = session.findById(table_id)
+                    scrollbar = table.VerticalScrollbar
+                except Exception as e:
+                    logger.warning(f"ZRMA 테이블 스크롤 실패 (top={scroll_top}): {e}")
+                    break
+
+            found_new = False
+            rows_seen_this_page = 0
+            i = 0
+            while True:
+                # GetCell(i,0) 실패 = 이 페이지에서 화면에 그려진 범위 초과 → 다음 페이지로
+                try:
+                    item_no = table.GetCell(i, 0).Text.strip()
                 except Exception:
-                    route = ''
+                    break
+                rows_seen_this_page = i + 1
+
+                # 빈 행 또는 상위/묶음 행 제외.
+                # ZRX/ZRE 실제 반영 대상은 101/102/201/202 같은 하위 item이다.
+                if not item_no or item_no.endswith('00') or item_no == '000000':
+                    i += 1
+                    continue
+
+                # 스크롤 겹침으로 이전에 이미 읽은 행이면 스킵 (already-seen이면
+                # 아래 아이템 처리는 건너뛰고 i만 증가시킨다).
+                if item_no in seen_item_nos:
+                    i += 1
+                    continue
+                seen_item_nos.add(item_no)
+                found_new = True
 
                 try:
-                    qty = max(1, int(float(qty_str)))
-                except (ValueError, TypeError):
-                    qty = 1
+                    matnr = table.GetCell(i, 1).Text.strip()
+                    if not _is_numeric_material(matnr):
+                        logger.info(f"오더 {order_num} material 제외 (숫자 아님): {matnr}")
+                        i += 1
+                        continue
+                    arktx   = table.GetCell(i, 2).Text.strip()
+                    qty_str = table.GetCell(i, 3).Text.strip()
+                    try:
+                        route = table.GetCell(i, 12).Text.strip()
+                    except Exception:
+                        route = ''
 
-                # Route로 배송/회수 판단
-                route_upper = route.upper()
-                if route_upper == 'RETURN':
-                    prefix = '회수'
-                elif route_upper == 'NEXDAY':
-                    prefix = '배송'
-                else:
-                    prefix = '배송'  # 기본값
-                    logger.warning(f"Route 판단 불명확: '{route}' → 배송으로 처리")
+                    try:
+                        qty = max(1, int(float(qty_str)))
+                    except (ValueError, TypeError):
+                        qty = 1
 
-                # 회수 아이템 S/N 초기 설정
-                is_return = (prefix == '회수')
-                is_bunit  = 'BUNIT' in arktx.upper()
-                if is_return and is_bunit:
-                    sn_list = ['X']   # Bunit: S/N 없음 (Technical objects 진입 불필요)
-                elif is_return:
-                    sn_list = None    # 나중에 collect_serial_numbers에서 수집
-                else:
-                    sn_list = []      # 배송: S/N 불필요
+                    # Route로 배송/회수 판단
+                    route_upper = route.upper()
+                    if route_upper == 'RETURN':
+                        prefix = '회수'
+                    elif route_upper == 'NEXDAY':
+                        prefix = '배송'
+                    else:
+                        prefix = '배송'  # 기본값
+                        logger.warning(f"Route 판단 불명확: '{route}' → 배송으로 처리")
 
-                items.append({
-                    'prefix':         prefix,
-                    'order_type':     order_type,
-                    'order_num':      order_num,
-                    'matnr':          matnr,
-                    'arktx':          arktx,
-                    'qty':            qty,
-                    'table_row_i':    i,        # Technical objects 진입용 행 인덱스
-                    'serial_numbers': sn_list,  # None=미수집, []=S/N없음, ['SN...']=수집됨
-                })
+                    # 회수 아이템 S/N 초기 설정
+                    is_return = (prefix == '회수')
+                    is_bunit  = 'BUNIT' in arktx.upper()
+                    if is_return and is_bunit:
+                        sn_list = ['X']   # Bunit: S/N 없음 (Technical objects 진입 불필요)
+                    elif is_return:
+                        sn_list = None    # 나중에 collect_serial_numbers에서 수집
+                    else:
+                        sn_list = []      # 배송: S/N 불필요
 
-            except Exception as e:
-                logger.warning(f"ZRMA 아이템 {i} 읽기 오류: {e}")
+                    items.append({
+                        'prefix':          prefix,
+                        'order_type':      order_type,
+                        'order_num':       order_num,
+                        'matnr':           matnr,
+                        'arktx':           arktx,
+                        'qty':             qty,
+                        'table_row_i':     i,          # Technical objects 진입용 행 인덱스 (해당 스크롤 위치 기준)
+                        'table_scroll_top': scroll_top,  # 위 행 인덱스가 유효한 스크롤 위치
+                        'serial_numbers':  sn_list,    # None=미수집, []=S/N없음, ['SN...']=수집됨
+                    })
+
+                except Exception as e:
+                    logger.warning(f"ZRMA 아이템 {i} 읽기 오류: {e}")
+
+                i += 1
+
+            if not found_new:
+                break
+            if scrollbar is None or scroll_top >= scroll_max:
+                break
+            scroll_top = min(scroll_top + rows_seen_this_page, scroll_max)
+
+        if scrollbar is not None:
+            try:
+                scrollbar.Position = 0
+            except Exception:
+                pass
 
     except Exception as e:
         logger.error(f"ZRMA 아이템 읽기 실패: {e}")
@@ -696,25 +982,53 @@ def get_items_from_zrma_order(session, order_num, order_type):
     return items
 
 
-def build_excel_rows_zrma(items, address, extra_orders, memo):
+def build_excel_rows_zrma(items, address, extra_orders, memo, obd_map=None):
     """
     ZRMA_Q 아이템 리스트 → Excel 행 리스트.
     아이템별 qty만큼 행 생성. 첫 번째 행에만 고객/주소 정보.
     배송/회수 행이 섞여있을 수 있으므로 prefix별로 그룹화하지 않고 순서대로.
     serial_numbers: qty 수에 맞게 분배 (부족하면 마지막 값 반복, 없으면 '')
+
+    PC/모니터/키보드/서버/라우터(_is_always_serialized_item)는 수량이 많아도
+    한 줄로 합치지 않고 항상 유닛별로 한 줄씩 생성한다 - 나중에 시리얼 번호를
+    한 줄씩 입력해야 하기 때문. 그 외 가끔 나가는 이벤트 물품만 수량>10이고
+    시리얼이 없을 때 "Qty: N" 한 줄로 합친다.
     """
     rows = []
     is_first = True
+    obd_map = obd_map or {}
+    obd_cursor = {}
+
+    def next_obd_for_item(item):
+        if item.get('prefix') != '배송':
+            return ''
+        value = obd_map.get(item.get('order_num'), '')
+        if isinstance(value, (list, tuple)):
+            key = item.get('order_num')
+            idx = obd_cursor.get(key, 0)
+            obd_cursor[key] = idx + 1
+            if not value:
+                return ''
+            return str(value[idx] if idx < len(value) else value[-1]).strip()
+        return str(value or '').strip()
 
     # 배송(NEXDAY) 먼저, 회수(RETURN) 나중
     items = sorted(items, key=lambda x: 0 if x['prefix'] == '배송' else 1)
 
     for item in items:
         sn_list = item.get('serial_numbers') or []  # None → []
+        large_no_serial = (
+            item.get('qty', 1) > 10
+            and not _is_always_serialized_item(item.get('arktx'))
+            and (not sn_list or all(str(sn or '').strip().upper() in ('', 'X') for sn in sn_list))
+        )
+        unit_count = 1 if large_no_serial else item['qty']
 
-        for unit_idx in range(item['qty']):
+        for unit_idx in range(unit_count):
             # S/N 분배: unit_idx에 맞는 S/N 선택, 부족하면 마지막 값, 없으면 ''
-            if sn_list:
+            if large_no_serial:
+                sn = ''
+            elif sn_list:
                 sn = sn_list[unit_idx] if unit_idx < len(sn_list) else sn_list[-1]
             else:
                 sn = ''
@@ -723,9 +1037,11 @@ def build_excel_rows_zrma(items, address, extra_orders, memo):
                 'order_prefix':  item['prefix'],
                 'order_type':    item['order_type'],
                 'order_num':     item['order_num'],
+                'obd':           next_obd_for_item(item),
                 'extra_orders':  extra_orders,
                 'material':      item['matnr'],
                 'description':   item['arktx'],
+                'quantity':      item['qty'] if large_no_serial else 1,
                 'serial_number': sn,
                 'customer':      address.get('customer', ''),
                 'phone':         address.get('phone', ''),
@@ -740,12 +1056,50 @@ def build_excel_rows_zrma(items, address, extra_orders, memo):
     return rows
 
 
-def process_zrma_orders(session, new_order_nums, order_map):
+def _safe_return_to_zrma_list(session, variant=None, date_mode=None):
+    """상세 화면에서 목록으로 복귀한다. F3이 막히면 ZRMA_Q를 다시 연다."""
+    try:
+        session.findById("wnd[0]").sendVKey(3)
+        time.sleep(1)
+        if is_on_zrma_list(session):
+            return True
+    except Exception as e:
+        logger.warning(f"ZRMA 목록 복귀(F3) 실패: {e}")
+
+    if variant and date_mode:
+        try:
+            logger.info(f"ZRMA_Q ({variant}) 목록 재진입")
+            navigate_to_zrma_q(session, variant, date_mode, apply_layout=False)
+            return True
+        except Exception as e:
+            logger.error(f"ZRMA_Q ({variant}) 목록 재진입 실패: {e}")
+    return False
+
+
+def _read_zrma_order_detail(session, order_num, order_type, obd_map=None):
+    """현재 열린 RMA 오더 화면에서 Excel 입력용 row를 만든다."""
+    address = get_ship_to_address_zrma(session)
+
+    text = get_text_content(session, menu_id=ZRMA_MENU_TEXTS)
+    all_extra = parse_extra_orders(text) if text else []
+    extra_orders = [eo for eo in all_extra if order_num not in eo]
+    text_contact = parse_contact_from_text(text) if text else {'found': False}
+    memo = parse_memo_for_display(text) if text else ""
+    if text_contact['found'] and not address.get('phone'):
+        address['phone'] = text_contact['phone']
+
+    items = get_items_from_zrma_order(session, order_num, order_type)
+    if not items:
+        return []
+
+    collect_serial_numbers(session, items)
+    return build_excel_rows_zrma(items, address, extra_orders, memo, obd_map=obd_map)
+
+
+def process_zrma_orders(session, new_order_nums, order_map, variant=None, date_mode=None, obd_map=None):
     """
     새 ZRMA 오더 처리.
-    new_order_nums: ['6123456', ...]
-    order_map: get_all_rows_from_zrma() 결과를 order_num으로 그룹핑한 dict
-    반환: {order_num: [excel_row, ...], ...}
+    목록 더블클릭이 Header Data 등 예상과 다른 화면으로 들어가면 VA02 직접 진입으로 재시도한다.
     """
     results = {}
 
@@ -755,52 +1109,37 @@ def process_zrma_orders(session, new_order_nums, order_map):
         if not order_info:
             continue
 
-        grid_idx   = order_info['grid_idx']
+        grid_idx = order_info['grid_idx']
         order_type = order_info['order_type']
 
-        # 1st Attempt 오더는 건너뜀 (이미 엑셀에 있을 가능성 높음)
         if 'attempt' in order_info.get('rma_status', '').lower():
             logger.info(f"오더 {order_num} 1st Attempt → 건너뜀")
             continue
 
-        if not navigate_to_zrma_order(session, grid_idx):
-            logger.error(f"오더 {order_num} 진입 실패")
-            continue
+        rows = []
+        opened_from_list = navigate_to_zrma_order(session, grid_idx)
+        if opened_from_list:
+            rows = _read_zrma_order_detail(session, order_num, order_type, obd_map=obd_map)
+            if not rows:
+                logger.warning(f"오더 {order_num} 목록 진입 화면에서 아이템 없음 → VA02 직접조회 재시도")
+        else:
+            logger.error(f"오더 {order_num} 목록 진입 실패 → VA02 직접조회 재시도")
 
-        # 주소 읽기
-        address = get_ship_to_address_zrma(session)
+        if not rows:
+            if order_num.startswith('6') and open_order_via_va02(session, order_num):
+                rows = _read_zrma_order_detail(session, order_num, order_type, obd_map=obd_map)
+            else:
+                logger.error(f"오더 {order_num} VA02 직접조회 실패")
 
-        # 텍스트 읽기
-        text = get_text_content(session, menu_id=ZRMA_MENU_TEXTS)
-        all_extra = parse_extra_orders(text) if text else []
-        # 메인 오더번호와 동일한 항목 제거 (중복 방지)
-        extra_orders = [eo for eo in all_extra if order_num not in eo]
-        text_contact = parse_contact_from_text(text) if text else {'found': False}
-        memo = parse_memo_for_display(text) if text else ""
-        if text_contact['found'] and not address.get('phone'):
-            address['phone'] = text_contact['phone']
+        if rows:
+            results[order_num] = rows
+            logger.info(f"ZRMA 오더 {order_num}: {len(rows)}행 생성")
+        else:
+            logger.warning(f"오더 {order_num} Excel 행 생성 실패")
 
-        # 아이템 읽기
-        items = get_items_from_zrma_order(session, order_num, order_type)
-        if not items:
-            logger.warning(f"오더 {order_num} 아이템 없음")
-            session.findById("wnd[0]").sendVKey(3)
-            time.sleep(0.5)
-            continue
-
-        # 회수 아이템 S/N 수집 (Extras > Technical objects)
-        collect_serial_numbers(session, items)
-
-        rows = build_excel_rows_zrma(items, address, extra_orders, memo)
-        results[order_num] = rows
-        logger.info(f"ZRMA 오더 {order_num}: {len(rows)}행 생성")
-
-        # 목록으로 복귀
-        session.findById("wnd[0]").sendVKey(3)
-        time.sleep(1)
+        _safe_return_to_zrma_list(session, variant, date_mode)
 
     return results
-
 
 def group_zrma_by_order(rows):
     """
