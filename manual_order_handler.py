@@ -44,21 +44,38 @@ from zrma_handler import (
 logger = logging.getLogger(__name__)
 
 
+MAX_SESSIONS = 6  # SAP GUI 연결당 세션 수 하드 리밋 - open_session.py/zrec_handler.py/
+                   # sn_relo_handler.py와 동일 (2026-09-16, SAP 자주 멈추는 문제 조사).
+
+
 def _open_new_sap_session():
-    """Create a new SAP GUI session and return it."""
+    """Create a new SAP GUI session and return it.
+
+    2026-09-16: "세션 개수가 늘었다 → 마지막 child가 새 세션"이라는 가정은
+    open_session.py/zrec_handler.py에도 있던 것과 같은 위험한 패턴이었다 -
+    방금 닫힌 세션의 SessionNumber가 재사용될 때 엉뚱한 기존 세션에 명령을
+    잘못 보내는 실제 사고를 낸 적이 있다 (zrec_handler.py의 2026-08-18
+    실측 사고: ZIH08 세션이 통째로 ZREC로 덮어써짐). SessionNumber 집합을
+    생성 전/후로 비교하는 안전한 방식으로 교체하고, 이미 세션이 다 찼을 때
+    시도하다 SAP GUI 자체가 먹통이 되는 것도 미리 막는다."""
     app = get_scripting_engine()
     conn = app.Children(0)
-    base = conn.Children(0)
-    before = conn.Children.Count
-    base.createSession()
+    if conn.Children.Count >= MAX_SESSIONS:
+        raise RuntimeError(
+            f"SAP GUI 세션이 이미 최대({MAX_SESSIONS}개)입니다 - "
+            "새 세션을 열려면 SAP에서 안 쓰는 세션을 먼저 닫으세요."
+        )
+    before = {conn.Children(i).Info.SessionNumber for i in range(conn.Children.Count)}
+    conn.Children(0).createSession()
 
     deadline = time.time() + 10
     while time.time() < deadline:
         try:
-            if conn.Children.Count > before:
-                sess = conn.Children(conn.Children.Count - 1)
-                logger.info(f"새 SAP 세션 생성: {sess.findById('wnd[0]').Text}")
-                return sess
+            for i in range(conn.Children.Count):
+                s = conn.Children(i)
+                if s.Info.SessionNumber not in before:
+                    logger.info(f"새 SAP 세션 생성: {s.findById('wnd[0]').Text}")
+                    return s
         except Exception:
             pass
         time.sleep(0.5)

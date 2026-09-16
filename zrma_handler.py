@@ -11,7 +11,6 @@ import calendar
 from sap_handler import (
     run_transaction,
     refresh_sap_list,
-    get_scripting_engine,
     get_ship_to_address_zrma,
     get_text_content,
     parse_extra_orders,
@@ -767,30 +766,6 @@ def _read_serial_numbers_from_popup_once(session):
             continue
 
     return sn_list
-
-
-def _open_new_session(session):
-    """현재 세션에서 새 SAP 세션 생성 후 반환. 실패 시 None."""
-    try:
-        session.createSession()
-        time.sleep(2)
-        conn = get_scripting_engine().Children(0)
-        count = conn.Children.Count
-        new_sess = conn.Children(count - 1)
-        logger.info(f"새 SAP 세션 생성 완료 (세션{count - 1})")
-        return new_sess
-    except Exception as e:
-        logger.error(f"새 SAP 세션 생성 실패: {e}")
-        return None
-
-
-def _close_session(sess):
-    """SAP 세션(창) 닫기."""
-    try:
-        sess.findById("wnd[0]").close()
-        time.sleep(0.5)
-    except Exception:
-        pass
 
 
 def collect_serial_numbers(session, items):
