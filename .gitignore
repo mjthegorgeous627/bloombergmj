@@ -26,3 +26,5 @@ pod_pending.json
 template_dump.txt
 _scratch_check.txt
 *.pptm
+order_locks/
+stop_automation.flag
