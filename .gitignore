@@ -1,8 +1,28 @@
 __pycache__/
 *.pyc
 *.pyo
-automation.log
 processed_orders.json
 credentials.py
 kakao_tokens.json
 test_kakao.py
+portal_browser.lock
+
+# operational data: logs, databases, session/runtime state - contain live
+# order/customer PII, never belongs in git history
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.bak_*
+diag_*.png
+diag_*.txt
+diag_*.json
+portal_*.png
+portal_session.json
+session_map.json
+banner_dump.json
+dashboard_online_sync_state.json
+pod_pending.json
+template_dump.txt
+_scratch_check.txt
+*.pptm
