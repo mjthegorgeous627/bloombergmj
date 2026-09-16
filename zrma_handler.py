@@ -17,6 +17,8 @@ from sap_handler import (
     parse_extra_orders,
     parse_contact_from_text,
     parse_memo_for_display,
+    collect_order_extra_fields,
+    add_extra_order_dedup,
     ZRMA_MENU_TEXTS,
 )
 
@@ -369,6 +371,11 @@ def get_all_rows_from_zrma(session):
         COL_ORDER_TYPE = "T_AUART"      # Sales Document Type (ZRE/ZRX/ZINX...)
         COL_NAME       = "T_NAME1"      # 회사명
         COL_RMA_STATUS = "T_KVGR4_NAME"  # RMA Status (1st Attempt 등)
+        # Collection Due Date - 회수 마감일자. 개별 오더 화면 안에는 안 보이고
+        # ZRMA_Q 목록 그리드 자체에 컬럼으로 있음 (라이브 세션에서 확인,
+        # 2026-08-06 - grid.GetColumnTitles()로 발견, project_sap_order_
+        # collection_gaps 메모 참고).
+        COL_COLL_DUE_DATE = "T_ZZCOLL_DUE_DATE"
 
         for i in range(row_count):
             try:
@@ -388,6 +395,7 @@ def get_all_rows_from_zrma(session):
                     'order_type': safe_get(COL_ORDER_TYPE),
                     'name':       safe_get(COL_NAME),
                     'rma_status': safe_get(COL_RMA_STATUS),
+                    'coll_due_date': safe_get(COL_COLL_DUE_DATE),
                 })
             except Exception as e:
                 logger.warning(f"ZRMA 행 {i} 읽기 오류: {e}")
@@ -446,7 +454,22 @@ def _write_sn_to_popup(session, new_sn):
     'Maintain Serial Numbers' 팝업(wnd[1])의 첫 번째 빈 행에 new_sn 입력.
     입력 후 Enter → Yes 팝업 처리.
     반환: True(성공) / False(실패)
-    """
+
+    2026-08-19 실측(inspect_return_serial_popup.py로 실제 오더 67072626의
+    팝업 구조 라이브 확인) 기반 수정: 실제 컬럼 기술명은 'RIPW0-SERNR'다
+    ('SERNR'은 존재하지 않음 - GetCell(i,"SERNR")은 원래도 실패하고
+    있었지만 그 예외를 잡아 GetCell(i,0)으로 넘어가서 셀 자체는 잘
+    찾고 있었음). 진짜 버그는 그 아래 tbl.setCurrentCell(i, "SERNR")
+    호출 - GetCell과 별개로 다시 문자열 "SERNR"을 그대로 넘겨서 실제
+    컬럼명과 안 맞아 예외가 났고, 이게 cell.text=new_sn **이전에** 터지는
+    바람에 시리얼 값이 아예 입력되지 않은 채(사용자 실측: "serial
+    number를 붙여넣지 않고") 예외 핸들러로 빠져 다음 행을 시도하다가
+    결국 3행 다 실패 → False 리턴하는 흐름이었다(주문 저장까지는 도달
+    안 함 - Ctrl+S는 이 함수가 True를 반환해야만 호출되므로 실제 오더
+    데이터 손상은 없었을 것으로 판단됨). setCurrentCell 호출을 제거하고
+    _read_serial_numbers_from_popup()과 동일한 3단계 컬럼명 폴백으로
+    통일 + 입력 직후 읽어보기(read-back)로 실제로 값이 들어갔는지
+    확인한 뒤에만 Enter를 누르도록 강화."""
     for tbl_id in _SN_TABLE_IDS:
         try:
             tbl = session.findById(tbl_id)
@@ -458,15 +481,30 @@ def _write_sn_to_popup(session, new_sn):
                 try:
                     cell = tbl.GetCell(i, "SERNR")
                 except Exception:
-                    cell = tbl.GetCell(i, 0)
+                    try:
+                        cell = tbl.GetCell(i, "RIPW0-SERNR")
+                    except Exception:
+                        cell = tbl.GetCell(i, 0)
 
                 if cell.Text.strip() != '':
                     continue  # 이미 값 있는 행 건너뜀
 
-                # 빈 행 발견 → S/N 입력
-                tbl.setCurrentCell(i, "SERNR")
+                # 빈 행 발견 → S/N 입력 (setCurrentCell 없이 cell에 바로 씀)
+                cell.setFocus()
                 cell.text = new_sn
                 time.sleep(0.3)
+
+                # 실제로 입력이 반영됐는지 읽어보기 - 반영 안 됐으면 Enter를
+                # 누르지 않고 안전하게 다음 행/테이블로 넘어간다(빈 값으로
+                # 확정해버리는 사고 방지).
+                written = ''
+                try:
+                    written = cell.Text.strip()
+                except Exception:
+                    pass
+                if written != str(new_sn).strip():
+                    logger.warning(f"S/N 입력 검증 실패 (행 {i}): 입력값이 반영 안 됨 (읽은 값='{written}')")
+                    continue
 
                 # Enter로 입력 확정
                 session.findById("wnd[1]").sendVKey(0)
@@ -600,27 +638,82 @@ def input_sn_to_return_item(session, order_num, new_sn):
         _close_tech_obj_popup(session)
         return {'status': 'error', 'existing_sns': [], 'message': 'S/N 입력 실패'}
 
-    # 7. 오더 저장 (Ctrl+S)
+    # 7. 오더 저장 (Ctrl+S) - 실제로 저장됐는지 확인까지 해야 한다. S/N의
+    # firm/cust와 오더의 firm/cust가 다르면 예외 없이 SAP 상태바에
+    # 에러 메시지만 뜨고 저장은 안 되는 케이스(paper relo 필요)라서,
+    # 예외가 안 났다고 무조건 'saved'로 보면 안 된다.
     try:
         session.findById("wnd[0]").sendVKey(11)
         time.sleep(1.5)
-        logger.info(f"오더 {order_num} 저장 완료")
     except Exception as e:
         return {'status': 'error', 'existing_sns': [], 'message': f'오더 저장 실패: {e}'}
 
+    # 저장 중 예상 못한 팝업(wnd[1])이 뜨면 - firm/cust 불일치 등으로 저장이
+    # 막혔을 가능성. 팝업 문구만 읽고 안전하게 Enter로 닫은 뒤 에러 처리 -
+    # paper relo 여부는 이 문구를 보고 사람이 최종 판단해야 한다.
+    try:
+        popup = session.findById("wnd[1]")
+        popup_text = popup.Text
+        try:
+            session.findById("wnd[1]").sendVKey(0)
+            time.sleep(0.5)
+        except Exception:
+            pass
+        logger.warning(f"오더 {order_num} 저장 중 팝업: {popup_text}")
+        return {
+            'status': 'error',
+            'existing_sns': [],
+            'message': f"저장 중 팝업 발생 - {popup_text} (firm/cust 불일치 가능 - paper relo 확인 필요)",
+        }
+    except Exception:
+        pass  # 팝업 없음 - 정상 진행
+
+    sbar_text, sbar_type = '', ''
+    try:
+        sbar = session.findById("wnd[0]/sbar")
+        sbar_text = (sbar.Text or '').strip()
+        sbar_type = (sbar.MessageType or '').upper()
+    except Exception:
+        pass
+
+    if sbar_type in ('E', 'A'):
+        logger.error(f"오더 {order_num} 저장 실패 (상태바 에러): {sbar_text}")
+        return {
+            'status': 'error',
+            'existing_sns': [],
+            'message': f"저장 실패 - {sbar_text} (firm/cust 불일치 가능 - paper relo 확인 필요)",
+        }
+
+    logger.info(f"오더 {order_num} 저장 완료 - 상태바: {sbar_text}")
     return {
         'status': 'saved',
         'existing_sns': [new_sn],
-        'message': f"S/N '{new_sn}' 입력 및 저장 완료",
+        'message': f"S/N '{new_sn}' 입력 및 저장 완료" + (f" ({sbar_text})" if sbar_text else ""),
     }
 
 
-def _read_serial_numbers_from_popup(session):
+def _read_serial_numbers_from_popup(session, retries=2, retry_delay=0.4):
     """
     'Maintain/Display Serial Numbers' 팝업(wnd[1])에서 S/N 목록 반환.
     GuiTableControl(편집 모드) 및 GuiGridView ALV(표시 모드) 모두 지원.
     반환: ['SN001', 'SN002', ...] 또는 []
+
+    NWBC에서 팝업이 뜬 직후 컨트롤이 아직 완전히 렌더링되지 않아 첫 시도에
+    테이블/그리드를 못 찾는 경우가 있어(2026-08-19 실측) 짧게 재시도한다.
     """
+    for attempt in range(retries + 1):
+        sn_list = _read_serial_numbers_from_popup_once(session)
+        if sn_list:
+            return sn_list
+        if attempt < retries:
+            logger.info(f"    S/N 읽기 재시도 ({attempt + 1}/{retries})")
+            time.sleep(retry_delay)
+
+    logger.warning("    S/N 읽기 실패: 팝업 테이블/그리드를 찾지 못함")
+    return []
+
+
+def _read_serial_numbers_from_popup_once(session):
     sn_list = []
 
     # 1) GuiTableControl 시도 (VA02 편집 모드)
@@ -673,8 +766,6 @@ def _read_serial_numbers_from_popup(session):
         except Exception:
             continue
 
-    if not sn_list:
-        logger.warning("    S/N 읽기 실패: 팝업 테이블/그리드를 찾지 못함")
     return sn_list
 
 
@@ -1048,6 +1139,7 @@ def build_excel_rows_zrma(items, address, extra_orders, memo, obd_map=None):
                 'company':       address.get('company', ''),
                 'street':        address.get('street', ''),
                 'street2':       address.get('street2', ''),
+                'cust_no':       address.get('cust_no', ''),
                 'memo':          memo,
                 'is_first_item': is_first,
             })
@@ -1076,7 +1168,7 @@ def _safe_return_to_zrma_list(session, variant=None, date_mode=None):
     return False
 
 
-def _read_zrma_order_detail(session, order_num, order_type, obd_map=None):
+def _read_zrma_order_detail(session, order_num, order_type, obd_map=None, coll_due_date=""):
     """현재 열린 RMA 오더 화면에서 Excel 입력용 row를 만든다."""
     address = get_ship_to_address_zrma(session)
 
@@ -1087,6 +1179,23 @@ def _read_zrma_order_detail(session, order_num, order_type, obd_map=None):
     memo = parse_memo_for_display(text) if text else ""
     if text_contact['found'] and not address.get('phone'):
         address['phone'] = text_contact['phone']
+
+    # SDSK(대부분) 또는 ORD(ZOR인 경우) 번호 / Ship-to Party 번호(Cust#) /
+    # Delivery Date - 오더가 이미 열려있는 이 session을 그대로 재사용 (VL06O/ZOR
+    # 경로와 달리 세션을 새로 열 필요 없음). 사용자 확인, 2026-08-06: ZRE/ZRX/
+    # ZINX 전부 동일 규칙 - PO Number 필드는 ZOR만 ORD, 나머지는 SDSK.
+    extra_fields = collect_order_extra_fields(order_num, order_type, existing_session=session)
+    if extra_fields.get('cust_no'):
+        address['cust_no'] = extra_fields['cust_no']
+    if extra_fields.get('po_number'):
+        extra_orders = add_extra_order_dedup(extra_orders, extra_fields['po_label'], extra_fields['po_number'])
+    memo_notes = []
+    if extra_fields.get('delivery_date'):
+        memo_notes.append(f"(delivery date: {extra_fields['delivery_date']})")
+    if coll_due_date:
+        memo_notes.append(f"(coll due date: {coll_due_date})")
+    if memo_notes:
+        memo = f"{memo}\n" + "\n".join(memo_notes) if memo else "\n".join(memo_notes)
 
     items = get_items_from_zrma_order(session, order_num, order_type)
     if not items:
@@ -1111,6 +1220,7 @@ def process_zrma_orders(session, new_order_nums, order_map, variant=None, date_m
 
         grid_idx = order_info['grid_idx']
         order_type = order_info['order_type']
+        coll_due_date = order_info.get('coll_due_date', '')
 
         if 'attempt' in order_info.get('rma_status', '').lower():
             logger.info(f"오더 {order_num} 1st Attempt → 건너뜀")
@@ -1119,7 +1229,7 @@ def process_zrma_orders(session, new_order_nums, order_map, variant=None, date_m
         rows = []
         opened_from_list = navigate_to_zrma_order(session, grid_idx)
         if opened_from_list:
-            rows = _read_zrma_order_detail(session, order_num, order_type, obd_map=obd_map)
+            rows = _read_zrma_order_detail(session, order_num, order_type, obd_map=obd_map, coll_due_date=coll_due_date)
             if not rows:
                 logger.warning(f"오더 {order_num} 목록 진입 화면에서 아이템 없음 → VA02 직접조회 재시도")
         else:
@@ -1127,7 +1237,7 @@ def process_zrma_orders(session, new_order_nums, order_map, variant=None, date_m
 
         if not rows:
             if order_num.startswith('6') and open_order_via_va02(session, order_num):
-                rows = _read_zrma_order_detail(session, order_num, order_type, obd_map=obd_map)
+                rows = _read_zrma_order_detail(session, order_num, order_type, obd_map=obd_map, coll_due_date=coll_due_date)
             else:
                 logger.error(f"오더 {order_num} VA02 직접조회 실패")
 
@@ -1155,5 +1265,6 @@ def group_zrma_by_order(rows):
                 'order_type': row['order_type'],
                 'name':       row['name'],
                 'rma_status': row['rma_status'],
+                'coll_due_date': row.get('coll_due_date', ''),
             }
     return orders
