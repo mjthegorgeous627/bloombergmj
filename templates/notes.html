@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bloomberg Dashboard - 메모</title>
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+:root{font-family:-apple-system,"Segoe UI","Malgun Gothic",Arial,sans-serif;
+  color:#1e293b;background:#f1f4f9;--line:#e2e8f0;--line-strong:#cbd5e1;--accent:#2563eb}
+body{display:flex;flex-direction:column}
+
+.topbar{height:38px;flex:0 0 auto;background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;
+  display:flex;align-items:center;justify-content:space-between;padding:0 18px;
+  box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.topbar h1{font-size:14.5px;margin:0;font-weight:600;letter-spacing:.2px}
+.topbar-right{display:flex;align-items:center;gap:10px}
+#saveState{font-size:11px;color:#86efac;opacity:0;transition:opacity .3s}
+#saveState.show{opacity:1}
+.topbar a{color:#cbd5e1;text-decoration:none;font-size:11.5px;border:1px solid #475569;
+  border-radius:5px;padding:3px 8px}
+.topbar a:hover{background:rgba(255,255,255,.1)}
+
+.tabbar{flex:0 0 auto;display:flex;align-items:flex-end;gap:2px;background:#e2e8f0;
+  padding:8px 12px 0;overflow-x:auto}
+.tab{display:flex;align-items:center;gap:6px;background:#dde3ec;color:#475569;
+  padding:8px 14px;border-radius:8px 8px 0 0;font-size:12.5px;font-weight:600;
+  cursor:pointer;white-space:nowrap;border:1px solid transparent;border-bottom:none;
+  max-width:220px}
+.tab:hover{background:#eef1f5}
+.tab.active{background:#fff;color:#0f172a;border-color:var(--line)}
+.tab .t-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;outline:none}
+.tab .t-title[contenteditable="true"]{cursor:text}
+.tab .t-close{color:#94a3b8;font-size:12px;line-height:1;padding:1px 3px;border-radius:3px}
+.tab .t-close:hover{background:#fee2e2;color:#dc2626}
+.tab-add{flex:0 0 auto;background:none;border:none;color:#64748b;font-size:16px;
+  cursor:pointer;padding:6px 10px;line-height:1}
+.tab-add:hover{color:#1e293b}
+
+.editor-wrap{flex:1;min-height:0;background:#fff;padding:0}
+#editor{width:100%;height:100%;border:none;outline:none;resize:none;padding:18px 22px;
+  font-family:"Cascadia Mono","Consolas","Malgun Gothic",monospace;font-size:13px;
+  line-height:1.65;color:#1e293b;background:#fff}
+#editor::placeholder{color:#94a3b8;font-family:inherit}
+
+.empty-state{flex:1;display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:10px;color:#94a3b8;font-size:13px}
+.empty-state button{height:32px;border:1px solid #d1d5db;background:#fff;border-radius:7px;
+  padding:0 16px;cursor:pointer;font-size:13px;color:#334155}
+.empty-state button:hover{background:#f8fafc}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>Bloomberg Dashboard - 메모</h1>
+  <div class="topbar-right"><span id="saveState">저장됨</span><a href="/">← 대시보드</a></div>
+</div>
+<div class="tabbar" id="tabbar"></div>
+<div class="editor-wrap" id="editorWrap" style="display:none">
+  <textarea id="editor" placeholder="여기에 자유롭게 입력하거나 엑셀 내용을 그대로 붙여넣으세요..."></textarea>
+</div>
+<div class="empty-state" id="emptyState" style="display:none">
+  <div>아직 메모장이 없습니다.</div>
+  <button onclick="createPage()">+ 첫 메모장 만들기</button>
+</div>
+<script>
+let PAGES = __PAGES__;
+let activeId = PAGES.length ? PAGES[0].id : null;
+let saveTimer = null;
+
+async function api(path, body){
+  const res = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {});
+  return res.json();
+}
+
+function currentPage(){ return PAGES.find(p=>p.id===activeId); }
+
+function enterTitleEdit(title, p){
+  title.contentEditable = 'true';
+  title.focus();
+  document.execCommand('selectAll', false, null);
+}
+
+function renderTabs(){
+  const bar = document.getElementById('tabbar');
+  bar.innerHTML = '';
+  PAGES.forEach(p=>{
+    const tab = document.createElement('div');
+    tab.className = 'tab' + (p.id===activeId ? ' active' : '');
+    tab.onclick = ()=>switchTo(p.id);
+
+    const title = document.createElement('span');
+    title.className = 't-title';
+    title.textContent = p.title;
+    title.dataset.pageId = p.id;
+    title.onclick = e=>{ if(title.isContentEditable) e.stopPropagation(); };
+    title.ondblclick = e=>{ e.stopPropagation(); enterTitleEdit(title, p); };
+    title.onblur = ()=>{
+      title.contentEditable = 'false';
+      const val = title.textContent.trim();
+      if(val && val !== p.title){
+        p.title = val;
+        api('/api/pages/edit', {id:p.id, field:'title', value:val});
+      } else {
+        title.textContent = p.title;
+      }
+    };
+    title.onkeydown = e=>{
+      if(e.key==='Enter'){ e.preventDefault(); title.blur(); }
+      if(e.key==='Escape'){ title.textContent = p.title; title.blur(); }
+    };
+    tab.appendChild(title);
+
+    if(p.id===activeId){
+      const close = document.createElement('span');
+      close.className = 't-close';
+      close.textContent = '✕';
+      close.title = '메모장 삭제';
+      close.onclick = e=>{ e.stopPropagation(); removePage(p.id); };
+      tab.appendChild(close);
+    }
+    bar.appendChild(tab);
+  });
+  const add = document.createElement('button');
+  add.className = 'tab-add';
+  add.textContent = '+';
+  add.title = '새 메모장';
+  add.onclick = ()=>createPage();
+  bar.appendChild(add);
+}
+
+function renderEditor(){
+  const wrap = document.getElementById('editorWrap');
+  const empty = document.getElementById('emptyState');
+  if(!PAGES.length){
+    wrap.style.display = 'none';
+    empty.style.display = 'flex';
+    return;
+  }
+  wrap.style.display = 'block';
+  empty.style.display = 'none';
+  const editor = document.getElementById('editor');
+  editor.value = (currentPage() || {}).body || '';
+}
+
+function switchTo(id){
+  flushSave(true);
+  activeId = id;
+  renderTabs();
+  renderEditor();
+  document.getElementById('editor').focus();
+}
+
+function showSaved(){
+  const el = document.getElementById('saveState');
+  el.classList.add('show');
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(()=>el.classList.remove('show'), 1200);
+}
+
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(()=>flushSave(false), 700);
+}
+
+function flushSave(immediate){
+  clearTimeout(saveTimer);
+  const page = currentPage();
+  if(!page) return;
+  const editor = document.getElementById('editor');
+  const val = editor.value;
+  if(val === page.body) return;
+  page.body = val;
+  api('/api/pages/edit', {id: page.id, field:'body', value: val}).then(showSaved);
+}
+
+document.getElementById('editor').addEventListener('input', scheduleSave);
+window.addEventListener('beforeunload', ()=>flushSave(true));
+
+async function createPage(){
+  const res = await api('/api/pages/add', {title:'새 메모장'});
+  if(res.added){
+    PAGES.push({id:res.id, title:res.title, body:'', sort_pos:PAGES.length, created_at:'', updated_at:''});
+    activeId = res.id;
+    renderTabs();
+    renderEditor();
+    const titleEl = document.querySelector('.tab.active .t-title');
+    if(titleEl) enterTitleEdit(titleEl, currentPage());
+  }
+}
+
+function removePage(id){
+  if(!confirm('이 메모장을 삭제할까요? 내용은 복구할 수 없습니다.')) return;
+  PAGES = PAGES.filter(p=>p.id!==id);
+  if(activeId===id) activeId = PAGES.length ? PAGES[0].id : null;
+  renderTabs();
+  renderEditor();
+  api('/api/pages/delete', {id});
+}
+
+renderTabs();
+renderEditor();
+</script>
+</body>
+</html>
