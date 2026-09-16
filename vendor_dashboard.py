@@ -12,6 +12,7 @@ would drift from what 마감 actually froze for a given day.
 import argparse
 import calendar
 import logging
+import os
 import re
 import sys
 from collections import defaultdict
@@ -107,11 +108,17 @@ def _classify_item(description, material=""):
 
 
 def _open_book(path):
-    filename = Path(path).name
+    """이미 열려있는 인스턴스를 전체 경로(fullname) 기준으로 찾는다.
+    2026-09-01 excel_handler.get_workbook()에서 고친 것과 같은 버그가
+    여기 따로 있었다: 파일명만("book.name") 비교하면 다른 폴더의 동명
+    파일이 열려 있을 때 엉뚱한 파일을 골라 그 위에 통계를 얹어 저장하게
+    된다."""
+    target = os.path.normcase(os.path.abspath(str(path)))
     try:
-        for book in xw.books:
-            if book.name == filename:
-                return book, False
+        for app in xw.apps:
+            for book in app.books:
+                if os.path.normcase(os.path.abspath(book.fullname)) == target:
+                    return book, False
     except Exception:
         pass
     return xw.Book(path), True

@@ -307,9 +307,11 @@ def _refit_row_heights(ws):
                     _com_retry(lambda col=col: ws.api.Cells(start, col).MergeArea.UnMerge())
                 _com_retry(lambda: ws.api.Rows(row_range).AutoFit())
                 ws.book.app.display_alerts = False
-                for col in (5, 6, 7, 8):
-                    _com_retry(lambda col=col: ws.api.Range(ws.api.Cells(start, col), ws.api.Cells(end, col)).Merge())
-                ws.book.app.display_alerts = True
+                try:
+                    for col in (5, 6, 7, 8):
+                        _com_retry(lambda col=col: ws.api.Range(ws.api.Cells(start, col), ws.api.Cells(end, col)).Merge())
+                finally:
+                    ws.book.app.display_alerts = True
                 r = end + 1
                 continue
         _com_retry(lambda r=r: ws.api.Rows(r).AutoFit())
@@ -638,9 +640,11 @@ def _write_order_rows(ws, insert_at, order_data_list):
     if num_rows > 1:
         end_row = insert_at + num_rows - 1
         ws.book.app.display_alerts = False
-        for col in [5, 6, 7, 8]:
-            _com_retry(lambda col=col: ws.range(ws.cells(insert_at, col), ws.cells(end_row, col)).api.Merge())
-        ws.book.app.display_alerts = True
+        try:
+            for col in [5, 6, 7, 8]:
+                _com_retry(lambda col=col: ws.range(ws.cells(insert_at, col), ws.cells(end_row, col)).api.Merge())
+        finally:
+            ws.book.app.display_alerts = True
 
     border_range = ws.range(
         ws.cells(insert_at, 1),

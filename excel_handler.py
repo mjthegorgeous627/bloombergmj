@@ -147,14 +147,27 @@ def _write_orders_to_excel_locked(order_data_list):
     if sheet_name in sheet_names:
         ws = wb.sheets[sheet_name]
     else:
-        # 월-일 패턴으로 탐색
+        # 정확한 "월-일" 시트명이 없을 때, "월.일"/"월_일" 같은 구분자
+        # 변형만 추가로 시도한다 (db.py의 today_sheet_names()와 동일한
+        # 후보군). 예전엔 시트명에 오늘 월/일 숫자가 부분 문자열로만
+        # 들어있어도 매치시켰는데(예: 1월 3일에 "1-13"/"11-3"/"1-31" 등을
+        # 전부 오매칭), 그마저 안 맞으면 wb.sheets.active(=사용자가 지금
+        # 실제로 보고 있는, 완전히 무관할 수 있는 시트)에 새 오더 행을
+        # 그대로 꽂아넣었다 - 조용한 오분류/데이터 오염 위험이라, 못 찾으면
+        # 화면 서식을 바꾸는 대신 명확히 실패시킨다.
         today = datetime.today()
-        matched = None
-        for sname in sheet_names:
-            if str(today.month) in sname and str(today.day) in sname:
-                matched = sname
-                break
-        ws = wb.sheets[matched] if matched else wb.sheets.active
+        candidates = {
+            f"{today.month}-{today.day}",
+            f"{today.month}.{today.day}",
+            f"{today.month}_{today.day}",
+        }
+        matched = next((s for s in sheet_names if s in candidates), None)
+        if matched is None:
+            raise RuntimeError(
+                f"오늘({sheet_name}) 시트를 찾을 수 없습니다 - 시트가 아직 "
+                f"안 만들어졌거나 이름이 다릅니다. 기존 시트 목록: {sheet_names}"
+            )
+        ws = wb.sheets[matched]
 
     # 삽입 위치 결정
     insert_after_row = find_today_section_end(ws)
@@ -257,9 +270,15 @@ def _write_orders_to_excel_locked(order_data_list):
             rng.api.UnMerge()
             rng.api.Merge()
 
-        for col in [5, 6, 7, 8]:  # E=담당자, F=전화, G=주소, H=메모
-            _com_retry(lambda col=col: _merge_col(col))
-        wb.app.display_alerts = True
+        try:
+            for col in [5, 6, 7, 8]:  # E=담당자, F=전화, G=주소, H=메모
+                _com_retry(lambda col=col: _merge_col(col))
+        finally:
+            # _com_retry가 3번 다 실패해서 예외를 그대로 올리는 경우(위 주석의
+            # 2026-08-31 실사고 케이스), finally 없이는 display_alerts=False가
+            # 이 공유 Excel App 인스턴스에 그대로 남아 이후 모든 작업(자동화는
+            # 물론 사용자가 직접 여는 저장/덮어쓰기 확인창까지) 조용히 억제됨.
+            wb.app.display_alerts = True
 
     # 모든 테두리 적용 (A~H, insert_at ~ insert_at+num_rows-1)
     border_range = ws.range(
@@ -294,8 +313,10 @@ def _write_kakao_sent_locked(ws, start_row, end_row):
     wb = ws.book
     if end_row > start_row:
         wb.app.display_alerts = False
-        _com_retry(lambda: ws.range(ws.cells(start_row, 10), ws.cells(end_row, 10)).api.Merge())
-        wb.app.display_alerts = True
+        try:
+            _com_retry(lambda: ws.range(ws.cells(start_row, 10), ws.cells(end_row, 10)).api.Merge())
+        finally:
+            wb.app.display_alerts = True
     cell = ws.cells(start_row, 10)
     cell.value = timestamp
     cell.api.WrapText = True
@@ -323,6 +344,7 @@ def get_existing_order_numbers(days=45):
     """
     found = set()
     num_re = re.compile(r'\b(\d{7,})\b')
+    wb = None
     try:
         wb = openpyxl.load_workbook(EXCEL_PATH, read_only=True, data_only=True)
         for sname in wb.sheetnames:
@@ -334,9 +356,11 @@ def get_existing_order_numbers(days=45):
                 if val and isinstance(val, str):
                     for m in num_re.finditer(val):
                         found.add(m.group(1))
-        wb.close()
     except Exception as e:
         print(f"[Excel] 기존 오더 스캔 실패: {e}")
+    finally:
+        if wb is not None:
+            wb.close()
     return found
 
 
@@ -446,10 +470,12 @@ def write_finalized_sheet_com(wb, sheet_name, d, rows):
                 j += 1
             if j - i > 1:
                 wb.app.display_alerts = False
-                _com_retry(lambda i=i, j=j, col=col: ws.range(
-                    ws.cells(row_numbers[i], col), ws.cells(row_numbers[j - 1], col)
-                ).api.Merge())
-                wb.app.display_alerts = True
+                try:
+                    _com_retry(lambda i=i, j=j, col=col: ws.range(
+                        ws.cells(row_numbers[i], col), ws.cells(row_numbers[j - 1], col)
+                    ).api.Merge())
+                finally:
+                    wb.app.display_alerts = True
             i = j
 
     _com_retry(lambda: ws.api.Rows(f"{row_cursor}:{row_numbers[-1]}").AutoFit())

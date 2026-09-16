@@ -15,6 +15,7 @@ import sqlite3
 import sys
 import threading
 import traceback
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -491,11 +492,23 @@ def purge_deleted_items():
         con.execute("DELETE FROM manual_item_edits WHERE item_id NOT IN (SELECT id FROM order_items)")
 
 
+@contextmanager
 def connect():
+    """모든 호출부가 `with connect() as con:` 형태로만 쓰고 있음(전수 확인) -
+    sqlite3.Connection을 그냥 context manager로 쓰면 __exit__가 commit/
+    rollback만 하고 실제로 connection을 close()하지는 않아서, 24시간 도는
+    이 프로세스(20분 루프 + HTTP 요청마다)에서 매 호출이 새 커넥션/파일
+    핸들을 계속 새로 열기만 하고 하나도 안 닫는 채 쌓이고 있었다.
+    @contextmanager로 감싸 with 블록을 빠져나갈 때(정상/예외 어느 쪽이든)
+    항상 close()까지 되도록 한다 - 호출부 코드는 전혀 안 바뀜."""
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
-    return con
+    try:
+        with con:
+            yield con
+    finally:
+        con.close()
 
 
 def add_event(con, order_id, message, level="info"):
