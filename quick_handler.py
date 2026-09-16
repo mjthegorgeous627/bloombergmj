@@ -175,9 +175,14 @@ _PRODUCT_MAP = [
     (['SERVER'],         '서버'),
 ]
 
+_US_KEYBOARD_MATERIALS = {'10045246'}
 
-def _get_product_name(description):
+
+def _get_product_name(description, material=''):
     desc = str(description).upper()
+    material = str(material or '').strip()
+    if material in _US_KEYBOARD_MATERIALS or ('KEYBOARD' in desc and re.search(r'\bUS\b', desc)):
+        return 'US일반키보드'
     for keywords, name in _PRODUCT_MAP:
         if all(k in desc for k in keywords):
             return name
@@ -195,7 +200,7 @@ def _build_item_line(items):
     counter = Counter()
     prefix_map = {}
     for item in items:
-        prod = _get_product_name(item['description'])
+        prod = _get_product_name(item['description'], item.get('material', ''))
         counter[prod] += 1
         prefix_map[prod] = item['prefix']
     for prod, cnt in counter.items():

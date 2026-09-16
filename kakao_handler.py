@@ -29,11 +29,16 @@ PRODUCT_MAP = [
     (['SERVER'],         '서버'),
 ]
 
+US_KEYBOARD_MATERIALS = {'10045246'}
+
 
 # ── 제품명 변환 ──────────────────────────────────────────────────────────────
 
-def _get_product_name(description):
+def _get_product_name(description, material=''):
     desc = str(description).upper()
+    material = str(material or '').strip()
+    if material in US_KEYBOARD_MATERIALS or ('KEYBOARD' in desc and re.search(r'\bUS\b', desc)):
+        return 'US일반키보드'
     for keywords, name in PRODUCT_MAP:
         if all(k in desc for k in keywords):
             return name
@@ -49,25 +54,36 @@ def format_kakao_message(order_data_list):
     형식:
       키보드 교체
       배송 키보드5 10063421
+      배송 일반키보드 10045196 X 2개
       회수 일반키보드 10045196
       CHULMIN KANG / 02-2004-9908
       SHINYOUNG SECURITIES CO LTD 34-8 YOIDO-DONG
+
+    같은 (구분/제품/자재번호) 조합은 줄바꿈 없이 합쳐서 "X n개"로 표시한다.
     """
     if not order_data_list:
         return ''
 
     prefixes = []
     products = []
-    item_lines = []
+    item_counts = {}  # (prefix, product, mn) -> count, 등장 순서 보존
 
     for item in order_data_list:
         prefix  = item.get('order_prefix', '')
-        product = _get_product_name(item.get('description', ''))
+        product = _get_product_name(item.get('description', ''), item.get('material', ''))
         mn      = item.get('material', '')
 
         prefixes.append(prefix)
         products.append(product)
-        item_lines.append(f"{prefix} {product} {mn}")
+        key = (prefix, product, mn)
+        item_counts[key] = item_counts.get(key, 0) + 1
+
+    item_lines = []
+    for (prefix, product, mn), count in item_counts.items():
+        line = f"{prefix} {product} {mn}"
+        if count > 1:
+            line += f" X {count}개"
+        item_lines.append(line)
 
     # 제목
     unique_products = list(dict.fromkeys(products))

@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0"
-python portal_login.py
+python launcher.py
 pause

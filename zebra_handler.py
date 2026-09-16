@@ -82,15 +82,15 @@ def build_zpl_label(qr_data, name, company):
     TEXT_X    = 400
 
     # 이름: 한 줄 유지
-    # 230dots / 20per char = 11자
-    NAME_MAX_CHARS = 25
-    FONT_H_NAME    = 52
-    FONT_W_NAME    = 20
+    # 230dots / 30per char ≈ 7자
+    NAME_MAX_CHARS = 20
+    FONT_H_NAME    = 75
+    FONT_W_NAME    = 30
 
     # 회사: 최대 2줄
-    CO_MAX_CHARS = 13
-    FONT_H_CO    = 44
-    FONT_W_CO    = 17
+    CO_MAX_CHARS = 8
+    FONT_H_CO    = 65
+    FONT_W_CO    = 26
 
     LINE_GAP = 12
 

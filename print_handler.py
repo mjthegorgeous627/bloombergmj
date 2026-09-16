@@ -32,6 +32,24 @@ def _get_worksheet(wb=None):
     return wb, wb.sheets.active
 
 
+def _find_sheet_by_key(wb, sheet_key):
+    """
+    '4-2' 형식 시트 키로 시트 반환.
+    정확히 일치 → 월/일 포함 유연 탐색 순으로 시도.
+    """
+    names = [s.name for s in wb.sheets]
+    if sheet_key in names:
+        return wb.sheets[sheet_key]
+    try:
+        month, day = map(int, sheet_key.split('-'))
+        for sname in names:
+            if str(month) in sname and str(day) in sname:
+                return wb.sheets[sname]
+    except Exception:
+        pass
+    return None
+
+
 def _find_date_headers(ws):
     """
     G열 전체 스캔 → 날짜 헤더 행 목록 반환.
@@ -162,6 +180,53 @@ def _print_section(wb, ws, start_row, end_row):
 
 
 # ── 공개 함수 ────────────────────────────────────────────────────────────────
+
+def print_section(sheet_key, date_key=None, afternoon=False):
+    """
+    지정 시트의 지정 날짜 섹션 인쇄.
+
+    sheet_key : '4-2' 형식 — 어느 시트에서 찾을지
+    date_key  : '4-2' 또는 '4-3' 형식 — 어느 날짜 섹션을 인쇄할지.
+                None이면 sheet_key와 동일 날짜 사용.
+    afternoon : False=첫 번째(오전), True=두 번째(오후) 섹션
+    """
+    if date_key is None:
+        date_key = sheet_key
+
+    wb = get_workbook()
+    ws = _find_sheet_by_key(wb, sheet_key)
+    if ws is None:
+        print(f"[프린트] 시트 '{sheet_key}' 없음")
+        return False
+
+    try:
+        month, day = map(int, date_key.split('-'))
+    except Exception:
+        print(f"[프린트] 날짜 형식 오류: '{date_key}' (올바른 예: 4-2)")
+        return False
+
+    headers = _find_date_headers(ws)
+    matched = [(r, mo, d) for r, mo, d in headers if mo == month and d == day]
+
+    if not matched:
+        print(f"[프린트] {date_key} 섹션 없음 (시트: {ws.name})")
+        return False
+
+    if afternoon:
+        if len(matched) < 2:
+            print(f"[프린트] {date_key} 오후 섹션 없음 — 섹션이 {len(matched)}개뿐")
+            return False
+        target_row = matched[1][0]
+        label = f"{date_key} 오후"
+    else:
+        target_row = matched[0][0]
+        label = f"{date_key} 오전" if len(matched) > 1 else date_key
+
+    start_row, end_row = _find_section_range(ws, target_row, headers)
+    print(f"[프린트] {label} 섹션: {ws.name} 시트 {start_row}행~{end_row}행")
+    _print_section(wb, ws, start_row, end_row)
+    return True
+
 
 def print_afternoon():
     """
