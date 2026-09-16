@@ -20,11 +20,54 @@ NWBC UI의 새 탭 로직과는 다른 내부 경로를 탄다.
 import sys
 import time
 import logging
+from pathlib import Path
 
 from sap_handler import get_scripting_engine
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+BASE_DIR = Path(__file__).resolve().parent
+
+# workbench_app.py가 이 스크립트를 CREATE_NO_WINDOW로 백그라운드 실행하므로
+# (sap_ops.sap_open_session/sap_open_order 참고) 콘솔이 없어 기본 stderr
+# 로깅은 아무도 못 본다 - 다른 자동화 스크립트들과 같은 방식으로 파일에도
+# 남긴다.
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.FileHandler(BASE_DIR / "open_session.log", encoding="utf-8"), logging.StreamHandler()],
+)
 logger = logging.getLogger(__name__)
+
+# SAP GUI 연결당 세션 수 하드 리밋 (zrec_handler.py/sn_relo_handler.py와 동일).
+# 자동루프 고정 4개 + ZREC류 세션까지 이미 여러 개가 항상 떠있는 상태라, 이
+# 체크 없이 무작정 createSession()을 시도하면 SAP가 에러 없이 그냥 먹통이
+# 되는 경우가 많다(2026-09 실측: "바로가기"를 반복 클릭한 뒤 SAP 창이
+# 응답 없음 상태로 굳는 문제).
+MAX_SESSIONS = 6
+
+
+def _create_new_session(conn):
+    """conn.Children(0).createSession() 후 실제로 새로 생긴 세션을 찾아 반환.
+    "세션 개수가 늘었다 → 마지막 child가 새 세션"이라는 가정은, 방금 닫힌
+    세션의 SessionNumber가 재사용될 때 엉뚱한 기존 세션에 명령을 잘못
+    보내는 실제 사고를 낸 적이 있다 (zrec_handler.py의 2026-08-18 실측
+    사고 기록 참고 - ZIH08 세션이 통째로 ZREC로 덮어써짐). 생성 전/후
+    SessionNumber 집합을 비교해서 진짜 새로 생긴 번호만 새 세션으로
+    인정하는, zrec_handler.py와 동일한 안전한 방식을 쓴다."""
+    if conn.Children.Count >= MAX_SESSIONS:
+        raise RuntimeError(
+            f"SAP GUI 세션이 이미 최대({MAX_SESSIONS}개)입니다 - "
+            "새 세션을 열려면 SAP에서 안 쓰는 세션을 먼저 닫으세요."
+        )
+    before = {conn.Children(i).Info.SessionNumber for i in range(conn.Children.Count)}
+    conn.Children(0).createSession()
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        time.sleep(0.5)
+        for i in range(conn.Children.Count):
+            s = conn.Children(i)
+            if s.Info.SessionNumber not in before:
+                return s
+    return None
 
 
 def open_new_session(tcode=None):
@@ -33,17 +76,11 @@ def open_new_session(tcode=None):
     before = conn.Children.Count
     logger.info(f"현재 세션 수: {before}개 → 새 세션 생성 중...")
 
-    conn.Children(0).createSession()
-
-    new_session = None
-    for _ in range(20):
-        time.sleep(0.5)
-        try:
-            if conn.Children.Count > before:
-                new_session = conn.Children(conn.Children.Count - 1)
-                break
-        except Exception:
-            continue
+    try:
+        new_session = _create_new_session(conn)
+    except RuntimeError as e:
+        logger.error(str(e))
+        return False
 
     if new_session is None:
         logger.error("새 세션이 시간 내에 나타나지 않음 (생성 실패 또는 지연)")
@@ -82,17 +119,11 @@ def open_order(order_num):
     before = conn.Children.Count
     logger.info(f"오더 {order_num} → {tcode} 새 세션에서 열기 (현재 세션 수: {before}개)")
 
-    conn.Children(0).createSession()
-
-    new_session = None
-    for _ in range(20):
-        time.sleep(0.5)
-        try:
-            if conn.Children.Count > before:
-                new_session = conn.Children(conn.Children.Count - 1)
-                break
-        except Exception:
-            continue
+    try:
+        new_session = _create_new_session(conn)
+    except RuntimeError as e:
+        logger.error(str(e))
+        return False
 
     if new_session is None:
         logger.error("새 세션이 시간 내에 나타나지 않음 (생성 실패 또는 지연)")
