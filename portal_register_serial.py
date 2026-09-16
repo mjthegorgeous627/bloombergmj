@@ -427,6 +427,26 @@ def register_serial(delivery_num, order_num, material=None, qty=None, serial="",
                 if run_ship_erp:
                     if _click_optional_by_text(page, "Run ShipERP"):
                         logger.info("Run ShipERP 클릭 완료")
+                    # 2026-09-16: 위 클릭이 "버튼을 못 찾음 -> 이미 완료된 걸로
+                    # 간주"로 조용히 넘어간 경우, 실제로는 버튼이 막혀있거나
+                    # 포털 상태가 예상과 달라서 못 누른 것뿐일 수 있다. 클릭
+                    # 성공/스킵 여부와 무관하게 화면이 실제로 다음 단계(Shipment/
+                    # Packing)로 넘어갔는지 확인해서, 여기서 조용히 성공 처리하고
+                    # 넘어가는 대신 명확히 실패시킨다 - 안 그러면 다음 단계
+                    # (Packing Post)가 "packing 버튼을 찾지 못했습니다" 같은,
+                    # 진짜 원인과 동떨어진 에러로 대신 실패한다 (2026-09-15/16
+                    # 실측: 오더 7858029, 67093809이 정확히 이 증상이었음).
+                    page.wait_for_timeout(1500)
+                    page_text_after = _page_text(page)
+                    if "Items to be packed" not in page_text_after and "Packed Items" not in page_text_after:
+                        try:
+                            page.screenshot(path=str(BASE_DIR / "portal_register_serial_error.png"), full_page=True, timeout=10000)
+                        except Exception:
+                            pass
+                        raise RuntimeError(
+                            "Run ShipERP 이후 Shipment/Packing 화면으로 전환되지 않았습니다 - "
+                            "버튼 클릭이 실패했거나 포털 상태가 예상과 다릅니다."
+                        )
                 return True
             finally:
                 try:

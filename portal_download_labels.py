@@ -31,12 +31,25 @@ def _search_url(days_before=14, days_after=14):
     )
 
 
-def _connect_page(pw):
+def _connect_page(pw, delivery_num=None):
+    """2026-09-16: 이 파일만 예전 "context.pages[-1]"(=지금 열려있는 마지막
+    탭을 무조건 가로챈다) 방식을 그대로 쓰고 있었다 - portal_register_serial.py
+    /portal_pack_post.py/portal_update_pod.py는 이미 이 delivery 관련 URL에
+    있는 탭을 먼저 찾아 재사용하도록 고쳐졌는데(portal_update_pod.py의
+    2026-08-28/08-31 실사고 주석 참고 - 무관한 탭을 가로채면 그 탭이
+    진행 중이던 작업/사용자가 보던 화면이 날아간다) 이 파일만 빠져있었다."""
     browser = pw.chromium.connect_over_cdp(CDP_URL)
     context = browser.contexts[0] if browser.contexts else None
     if context is None:
         raise RuntimeError("Chrome context를 찾지 못했습니다.")
-    page = context.pages[-1] if context.pages else context.new_page()
+    page = None
+    if delivery_num:
+        for candidate in context.pages:
+            if DELIVERY_BASE + str(delivery_num) in candidate.url or PORTAL_SHIPMENT_URL in candidate.url:
+                page = candidate
+                break
+    if page is None:
+        page = context.pages[-1] if context.pages else context.new_page()
     return browser, page
 
 
@@ -194,7 +207,7 @@ def run(delivery_num, do_print=False):
     with portal_browser_lock(f"download_labels:{delivery_num}"):
         with sync_playwright() as pw:
             for attempt in range(2):
-                browser, page = _connect_page(pw)
+                browser, page = _connect_page(pw, delivery_num)
                 try:
                     paths = _attempt_download(page, delivery_num)
                     if do_print and not _print_files(paths):

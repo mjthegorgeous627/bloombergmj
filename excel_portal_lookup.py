@@ -1,5 +1,6 @@
 """Read portal automation defaults from the live delivery Excel workbook."""
 
+import os
 import re
 from collections import Counter
 from datetime import datetime
@@ -221,18 +222,25 @@ def build_default_remarks(rows, signed_by, pickup_mode=None):
     if "ZRX" in order_types or pickup_expected:
         if collected:
             return f"Delivered {delivered}, and collected {collected}, to/from {signed_by}."
-        if pickup_mode == "later":
-            return f"Delivered {delivered} to {signed_by}, and will collect later."
         return f"Delivered {delivered} to {signed_by}, and will collect later."
     return f"Delivered {delivered} to {signed_by}."
 
 
 def _open_live_workbook():
-    filename = EXCEL_PATH.split("\\")[-1]
+    """이미 열려있는 인스턴스를 전체 경로 기준으로, 떠 있는 모든 Excel
+    인스턴스(xw.apps)를 통틀어 찾는다. 예전엔 파일명만("book.name") +
+    기본 Excel 인스턴스의 책 목록(xw.books)만 봤는데, 이건
+    excel_handler.get_workbook()이 2026-09-01에 고친 것과 같은 종류의
+    버그다 - 다른 폴더의 동명 파일이나, board_sync.py가 화면에 안 보이게
+    별도로 띄워둔 인스턴스에 열려있는 진짜 파일을 못 찾고 조용히 None을
+    반환해(호출부는 디스크에서 다시 읽는 것으로 대체) 저장 안 된 최신
+    편집 내용을 놓칠 수 있었다."""
+    target = os.path.normcase(os.path.abspath(str(EXCEL_PATH)))
     try:
-        for book in xw.books:
-            if book.name == filename:
-                return book
+        for app in xw.apps:
+            for book in app.books:
+                if os.path.normcase(os.path.abspath(book.fullname)) == target:
+                    return book
     except Exception:
         return None
     return None
