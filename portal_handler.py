@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 PORTAL_LOGIN_URL    = "https://bsp.btogo.com/supplier/login"
 PORTAL_SHIPMENT_URL = "https://bsp.btogo.com/supplier/warehouse/shipment/index"
+CDP_URL             = "http://localhost:9222"
 
 
 def _wait(page, seconds):
@@ -275,6 +276,32 @@ def _process_delivery_list(page, delivery_nums, printed, force=False):
 
 def _open_browser_with_session(pw):
     """브라우저 + 로그인 세션 준비. (page, context, browser) 반환."""
+    try:
+        browser = pw.chromium.connect_over_cdp(CDP_URL)
+        context = browser.contexts[0] if browser.contexts else None
+        if context is not None:
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto(PORTAL_SHIPMENT_URL)
+            _wait(page, 4)
+            if _is_logged_in(page):
+                logger.info("기존 Chrome 포털 로그인 세션 사용")
+                return page, context, browser
+
+            logger.info("기존 Chrome 연결됨 - 포털 로그인이 필요합니다")
+            page.goto(PORTAL_LOGIN_URL)
+            _wait(page, 2)
+            input("  Chrome에서 로그인/BUIT 인증 완료 후 Enter: ")
+            page.goto(PORTAL_SHIPMENT_URL)
+            _wait(page, 4)
+            if _is_logged_in(page):
+                logger.info("기존 Chrome 로그인 완료")
+                return page, context, browser
+        try:
+            browser.close()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.info(f"기존 Chrome 연결 불가 - 새 브라우저 사용: {e}")
     try:
         from credentials import PORTAL_USER, PORTAL_PASSWORD
     except ImportError:
