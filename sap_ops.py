@@ -20,6 +20,7 @@ from pathlib import Path
 from config import REFRESH_INTERVAL_MINUTES
 from db import BASE_DIR, LOG_FILE, add_event, connect, ensure_db, logger, now_text
 from holiday_check import skip_reason
+from sap_handler import kill_stuck_sap_gui_processes
 
 def _running_sap_loop_pids():
     """PIDs of any python process currently running main.py or startup.py as
@@ -145,6 +146,18 @@ def _watchdog_append_log(message):
 
 
 def _watchdog_restart_loop(reason):
+    """2026-09-17 실측(스크린샷, "License Information for Multiple Logons"
+    팝업에 걸려 로그인 화면에 멈춰선 SAP): 여기서는 python 프로세스(startup.py)
+    만 taskkill하고 실제 SAP 프론트엔드(NWBC/SapGuiServer)는 그대로 뒀다 -
+    startup.py 자체의 재연결 로직(launch_sap_and_connect())은 이미 2026-08-30
+    사고 이후 죽은 SAP GUI를 직접 찾아 죽이는 kill_stuck_sap_gui_processes()를
+    쓰도록 고쳐졌는데, 이 워치독(automation.log 30분 무갱신 감지 시 재시작하는
+    경로)만 그 수정을 안 받고 예전 방식 그대로였다. 그 결과: python만 죽고
+    실제로 멈춰있던 SAP GUI는 좀비로 남아 SAP 백엔드에 로그온 상태를 유지,
+    재시작된 startup.py의 새 로그인 시도가 그 좀비와 충돌해 License
+    Information for Multiple Logons 팝업에 다시 멈춰서는 걸 반복했다.
+    kill_stuck_sap_gui_processes()를 여기서도 호출해 launch_sap_and_connect()
+    가 하는 것과 같은 정리를 거치게 한다."""
     pids = _running_sap_loop_pids()
     for pid in pids:
         try:
@@ -157,6 +170,10 @@ def _watchdog_restart_loop(reason):
             pass
     if pids:
         time.sleep(3)
+    try:
+        kill_stuck_sap_gui_processes()
+    except Exception as exc:
+        _watchdog_append_log(f"SAP GUI 프로세스 정리 실패 (무시하고 재시작 계속): {exc}")
     if STOP_AUTOMATION_FLAG.exists():
         try:
             STOP_AUTOMATION_FLAG.unlink()

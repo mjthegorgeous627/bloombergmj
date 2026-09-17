@@ -4,6 +4,8 @@ SAP GUI Scripting - VL06O 배송 오더 데이터 추출 모듈.
 """
 
 import win32com.client
+import subprocess
+import threading
 import time
 import re
 import json
@@ -126,6 +128,88 @@ def graceful_close_all_sap_connections():
         except Exception as e:
             logger.info(f"SAP connection[{i}] 정상 로그오프 실패 (무시): {e}")
     return closed_any
+
+
+def run_with_timeout(fn, timeout_sec):
+    """fn()을 데몬 스레드에서 실행하고 timeout_sec 안에 안 끝나면 (False, None).
+    SAP GUI Scripting COM 호출은 자체 타임아웃이 없어서, 원격 NWBC/SapGuiServer가
+    죽어있으면(예: 주말 내내 idle이던 세션이 백엔드 타임아웃/VPN 끊김으로
+    응답불능이 되는 경우) 그냥 영원히 블록된다 - 예외를 던지는 게 아니라
+    "응답 없음"이라 try/except로는 절대 못 잡는다.
+
+    2026-08-30 실사고: 이 실패 유형이 정확히 이 함수가 감싸는 "기존 세션
+    재사용" 체크(startup.py launch_sap_and_connect() 1단계) 안에서 터졌다.
+    워치독이 30분마다 python 프로세스를 강제 재시작해도, 새로 뜬 startup.py가
+    이 체크에서 또 그 죽은 세션을 발견하고 다시 블록되는 걸 반복 - 그래서
+    일요일 오전부터 월요일 아침까지 20번 넘게 재시작해도 하나도 안 풀렸다.
+    타임아웃으로 감싸서 "N초 안에 응답 없음"을 "죽음"으로 취급해야 그
+    자리에서 실제로 죽은 프로세스를 찾아 죽이고 새로 시작할 수 있다.
+
+    타임아웃이 나도 이 스레드 자체를 강제로 죽일 방법은 없다(daemon=True라
+    최소한 프로세스 종료는 안 막음) - 대부분은 이 함수를 부른 직후
+    kill_stuck_sap_gui_processes()가 그 죽은 NWBC/SapGuiServer를 실제로
+    죽여버리므로, 블록돼 있던 COM 호출도 곧 에러로 풀려나며 스레드가
+    알아서 끝난다.
+
+    2026-09-17: startup.py 전용이었던 걸 sap_handler.py로 옮김 - workbench의
+    자체 워치독(sap_ops._watchdog_restart_loop, "automation.log 30분 이상
+    무갱신" 감지 시 startup.py를 재시작하는 그 경로)이 python 프로세스만
+    taskkill하고 진짜 멈춰있던 NWBC/SapGuiServer는 그대로 남겨둬서, 재시작된
+    startup.py의 새 로그인 시도가 그 좀비와 충돌해 "License Information for
+    Multiple Logons" 팝업에 다시 걸리는 게 반복됐다(2026-09-17 실측 스크린샷).
+    startup.py만 쓰던 이 정리 로직을 워치독도 같이 쓸 수 있게 공용 모듈로
+    옮겼다."""
+    result = {}
+
+    def runner():
+        try:
+            result["value"] = fn()
+        except Exception as e:
+            result["error"] = e
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    t.join(timeout_sec)
+    if t.is_alive():
+        return False, None
+    if "error" in result:
+        raise result["error"]
+    return True, result.get("value")
+
+
+def kill_stuck_sap_gui_processes():
+    """실제 SAP 프론트엔드 프로세스(NWBC/NwbcProcessAgent/SapGuiServer,
+    구형 saplogon 포함)를 강제 종료. python.exe는 절대 안 건드림 - 워치독의
+    기존 taskkill(main.py/startup.py 대상)은 이 프로세스들을 전혀 안
+    건드려서, 진짜 죽은 SAP GUI는 그대로 남아있고 재시작마다 그 좀비를
+    다시 붙잡는 게 2026-08-30 사고의 근본 원인이었다. 죽일 게 없어도
+    안전하게 아무 일도 안 함.
+
+    2026-09-14: 강제종료(Stop-Process) 직전에 정상 로그오프를 먼저 시도한다
+    (타임아웃 8초로 감싸서, 이미 완전히 죽어 응답 없는 경우엔 그냥 넘어가고
+    바로 강제종료로 진행 - graceful_close_all_sap_connections() 자체가
+    막혀있는 스크립팅 엔진을 부를 수 있어서 run_with_timeout 없이 직접
+    부르면 여기서도 영원히 블록될 수 있음). 로그오프 없이 그냥 죽이면 SAP
+    백엔드에 로그온이 남아 다음 로그인 시도가 "License Information for
+    Multiple Logons" 팝업과 충돌하는 게 근본 원인이었다."""
+    try:
+        run_with_timeout(graceful_close_all_sap_connections, timeout_sec=8)
+    except Exception as e:
+        logger.info(f"정상 로그오프 시도 중 예외 (무시하고 강제종료로 진행): {e}")
+
+    ps_cmd = (
+        "Get-Process -Name NWBC,NwbcProcessAgent,SapGuiServer,saplogon "
+        "-ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"
+    )
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+        )
+        logger.info("응답 없는 SAP GUI 프로세스(NWBC/SapGuiServer 등) 강제 종료")
+    except Exception as e:
+        logger.warning(f"SAP GUI 프로세스 강제 종료 실패 (무시하고 계속 진행): {e}")
+    time.sleep(2)
 
 
 def handle_multi_logon_popup(sess, end_other_logons=True):

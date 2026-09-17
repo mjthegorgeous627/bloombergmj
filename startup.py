@@ -45,7 +45,8 @@ from sap_handler import (
     navigate_to_vl06o_list,
     save_session_map,
     handle_multi_logon_popup,
-    graceful_close_all_sap_connections,
+    run_with_timeout,
+    kill_stuck_sap_gui_processes,
 )
 from vl10g_handler import navigate_to_vl10g
 from zrma_handler import navigate_to_zrma_q
@@ -252,77 +253,13 @@ def _handle_rp1_login_dialog(user, password):
     return False
 
 
-def _run_with_timeout(fn, timeout_sec):
-    """fn()을 데몬 스레드에서 실행하고 timeout_sec 안에 안 끝나면 (False, None).
-    SAP GUI Scripting COM 호출은 자체 타임아웃이 없어서, 원격 NWBC/SapGuiServer가
-    죽어있으면(예: 주말 내내 idle이던 세션이 백엔드 타임아웃/VPN 끊김으로
-    응답불능이 되는 경우) 그냥 영원히 블록된다 - 예외를 던지는 게 아니라
-    "응답 없음"이라 try/except로는 절대 못 잡는다.
-
-    2026-08-30 실사고: 이 실패 유형이 정확히 이 함수가 감싸는 "기존 세션
-    재사용" 체크(launch_sap_and_connect() 1단계) 안에서 터졌다. 워치독이
-    30분마다 python 프로세스를 강제 재시작해도, 새로 뜬 startup.py가 이
-    체크에서 또 그 죽은 세션을 발견하고 다시 블록되는 걸 반복 - 그래서
-    일요일 오전부터 월요일 아침까지 20번 넘게 재시작해도 하나도 안 풀렸다.
-    타임아웃으로 감싸서 "N초 안에 응답 없음"을 "죽음"으로 취급해야 그
-    자리에서 실제로 죽은 프로세스를 찾아 죽이고 새로 시작할 수 있다.
-
-    타임아웃이 나도 이 스레드 자체를 강제로 죽일 방법은 없다(daemon=True라
-    최소한 프로세스 종료는 안 막음) - 대부분은 이 함수를 부른 직후
-    _kill_stuck_sap_gui_processes()가 그 죽은 NWBC/SapGuiServer를 실제로
-    죽여버리므로, 블록돼 있던 COM 호출도 곧 에러로 풀려나며 스레드가
-    알아서 끝난다."""
-    result = {}
-
-    def runner():
-        try:
-            result["value"] = fn()
-        except Exception as e:
-            result["error"] = e
-
-    t = threading.Thread(target=runner, daemon=True)
-    t.start()
-    t.join(timeout_sec)
-    if t.is_alive():
-        return False, None
-    if "error" in result:
-        raise result["error"]
-    return True, result.get("value")
-
-
-def _kill_stuck_sap_gui_processes():
-    """실제 SAP 프론트엔드 프로세스(NWBC/NwbcProcessAgent/SapGuiServer,
-    구형 saplogon 포함)를 강제 종료. python.exe는 절대 안 건드림 - 워치독의
-    기존 taskkill(main.py/startup.py 대상)은 이 프로세스들을 전혀 안
-    건드려서, 진짜 죽은 SAP GUI는 그대로 남아있고 재시작마다 그 좀비를
-    다시 붙잡는 게 2026-08-30 사고의 근본 원인이었다. 죽일 게 없어도
-    안전하게 아무 일도 안 함.
-
-    2026-09-14: 강제종료(Stop-Process) 직전에 정상 로그오프를 먼저 시도한다
-    (타임아웃 8초로 감싸서, 이미 완전히 죽어 응답 없는 경우엔 그냥 넘어가고
-    바로 강제종료로 진행 - graceful_close_all_sap_connections() 자체가
-    막혀있는 스크립팅 엔진을 부를 수 있어서 _run_with_timeout 없이 직접
-    부르면 여기서도 영원히 블록될 수 있음). 로그오프 없이 그냥 죽이면 SAP
-    백엔드에 로그온이 남아 다음 로그인 시도가 "License Information for
-    Multiple Logons" 팝업과 충돌하는 게 근본 원인이었다."""
-    try:
-        _run_with_timeout(graceful_close_all_sap_connections, timeout_sec=8)
-    except Exception as e:
-        logger.info(f"정상 로그오프 시도 중 예외 (무시하고 강제종료로 진행): {e}")
-
-    ps_cmd = (
-        "Get-Process -Name NWBC,NwbcProcessAgent,SapGuiServer,saplogon "
-        "-ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"
-    )
-    try:
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps_cmd],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
-        )
-        logger.info("응답 없는 SAP GUI 프로세스(NWBC/SapGuiServer 등) 강제 종료")
-    except Exception as e:
-        logger.warning(f"SAP GUI 프로세스 강제 종료 실패 (무시하고 계속 진행): {e}")
-    time.sleep(2)
+# run_with_timeout()/kill_stuck_sap_gui_processes()는 2026-09-17에
+# sap_handler.py로 옮겼다 - workbench 자체 워치독(sap_ops._watchdog_restart_loop)
+# 도 같은 정리 로직이 필요해서 공용 모듈로 뺐다. 아래에서 이름만 로컬
+# alias로 유지해 이 파일 안의 기존 호출부(_run_with_timeout/
+# _kill_stuck_sap_gui_processes)는 그대로 둔다.
+_run_with_timeout = run_with_timeout
+_kill_stuck_sap_gui_processes = kill_stuck_sap_gui_processes
 
 
 def _try_reuse_existing_session():
@@ -475,18 +412,18 @@ def _try_manual_login(conn, client, user, password, language):
             continue
 
     # 중복 로그인 팝업 처리
+    #
+    # 2026-09-17 실측(스크린샷): 이 폴백 경로(sapshcut.exe 실패 시 수동 로그인)
+    # 만 하드코딩 필드ID(radMULTI_LOGON_OPT1/2)로 처리하고 있었다 - 이 ID는
+    # SAP 버전에 따라 바뀔 수 있어서 2026-09-14에 이미 한 번 실패가 확인됐고
+    # (그래서 sap_handler.handle_multi_logon_popup()이 화면 문구 기반으로
+    # 새로 만들어졌다 - 아래 docstring 참고), _dismiss_popup()을 거치는 다른
+    # 로그인 경로들은 전부 그걸로 갈아탔는데 이 폴백 경로만 예전 방식 그대로
+    # 남아있었다. 팝업이 실제로 안 닫히면 로그인 화면에 그대로 멈춰서고("SAP
+    # 다운"으로 보임), 다음 자동루프 사이클도 같은 좀비 로그온과 또 충돌해서
+    # 반복된다.
     try:
-        popup = sess.findById("wnd[1]")
-        popup_text = popup.Text.lower()
-        if "logon" in popup_text or "session" in popup_text:
-            for fid in ["wnd[1]/usr/radMULTI_LOGON_OPT2", "wnd[1]/usr/radMULTI_LOGON_OPT1"]:
-                try:
-                    sess.findById(fid).select()
-                    break
-                except Exception:
-                    continue
-            sess.findById("wnd[1]").sendVKey(0)
-            time.sleep(2)
+        handle_multi_logon_popup(sess)
     except Exception:
         pass
 
