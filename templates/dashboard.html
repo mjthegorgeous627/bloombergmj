@@ -1861,13 +1861,47 @@ function buildGroupRows(group, allSpans, gi){
       const starts=(storedCount>=1 && storedCount<=fields.length)
         ? manualRowGroupStarts(storedCount)
         : null;
+      // Cross-order merge (mergeChecked(), MERGE_FIELDS) reaches into a manual
+      // memo row's own compact rendering too - a manual row (order_no blank)
+      // can be picked as the merge anchor for customer/phone/address/memo
+      // (e.g. one delivery address shared by both a memo row and its
+      // matching real ZINP/ZRX order), or it can be the one that gets
+      // absorbed into a DIFFERENT row's rowSpan. Before this, this branch
+      // always drew row[field] standalone and never looked at allSpans/gi,
+      // so a merged manual row rendered as if unmerged (real bug report,
+      // 2026-09-17: "체크된 행 병합"이 안 먹힌다) - worse, an ABSORBED manual
+      // row still drew its own (blank) cust/phone/addr/memo cells instead of
+      // being skipped, breaking column count for every row after it in that
+      // merged block. Only handled when this field's own compact-column slot
+      // isn't ALSO combined with another field via colSpan (span===1) - a
+      // manual row compacted down to fewer than 7 cells AND cross-merged on
+      // one of those combined fields is rare enough to leave as a known gap
+      // rather than reconcile colSpan+rowSpan math for it here.
+      const mergedFieldTd=(field, cellClass)=>{
+        const fs=allSpans[field][gi];
+        if(!fs.isFirst) return null;  // absorbed into a preceding row's merged span - render nothing
+        const td=makeEditableTd(
+          resolvedField({rows: fs.mergedRows}, field), cellClass,
+          v=>fs.mergedRows.forEach(r=>r[field]=v),
+          v=>persistOrderField(fs.mergedRows.map(r=>r.itemId), field, v)
+        );
+        if(fs.span>1) td.rowSpan=fs.span;
+        return td;
+      };
+      const isCrossMerged=field=>MERGE_FIELDS.includes(field) && row.mergeGroups && row.mergeGroups[field];
       if(starts){
-        starts.forEach((start,gi)=>{
-          const end=gi+1<starts.length ? starts[gi+1] : fields.length;
+        starts.forEach((start,ci)=>{
+          const end=ci+1<starts.length ? starts[ci+1] : fields.length;
           const span=end-start;
           const [field, cellClass, setLocal, persist]=fields[start];
-          const td=makeEditableTd(row[field]||'', cellClass, setLocal, persist);
-          if(span>1) td.colSpan=span;
+          let td;
+          if(span===1 && isCrossMerged(field)){
+            td=mergedFieldTd(field, cellClass);
+          } else {
+            td=makeEditableTd(row[field]||'', cellClass, setLocal, persist);
+            if(span>1) td.colSpan=span;
+          }
+          if(!td) return;
           applyHighlight(td, row.itemId, field, row);
           tr.appendChild(td);
         });
@@ -1877,10 +1911,17 @@ function buildGroupRows(group, allSpans, gi){
           const [field, cellClass, setLocal, persist]=fields[idx];
           let span=1;
           while(idx+span<fields.length && !(row[fields[idx+span][0]]||'').trim()) span++;
-          const td=makeEditableTd(row[field]||'', cellClass, setLocal, persist);
-          if(span>1) td.colSpan=span;
-          applyHighlight(td, row.itemId, field, row);
-          tr.appendChild(td);
+          let td;
+          if(span===1 && isCrossMerged(field)){
+            td=mergedFieldTd(field, cellClass);
+          } else {
+            td=makeEditableTd(row[field]||'', cellClass, setLocal, persist);
+            if(span>1) td.colSpan=span;
+          }
+          if(td){
+            applyHighlight(td, row.itemId, field, row);
+            tr.appendChild(td);
+          }
           idx+=span;
         }
       }
@@ -1931,8 +1972,13 @@ function buildGroupRows(group, allSpans, gi){
         .forEach(([field, cellClass])=>{
           const fs=allSpans[field][gi];
           if(!fs.isFirst) return;
+          // resolvedField({rows: fs.mergedRows}, ...), not resolvedField(group, ...) -
+          // this order-group can be the merge anchor (isFirst) while a DIFFERENT
+          // order later in the same merged block is the one actually holding the
+          // real text (this group's own rows may all be blank for this field) -
+          // only mergedRows covers every row the span actually renders over.
           const td=makeEditableTd(
-            resolvedField(group, field), 'cust-cell '+cellClass, v=>fs.mergedRows.forEach(r=>r[field]=v),
+            resolvedField({rows: fs.mergedRows}, field), 'cust-cell '+cellClass, v=>fs.mergedRows.forEach(r=>r[field]=v),
             v=>persistOrderField(fs.mergedRows.map(r=>r.itemId), field, v)
           );
           td.rowSpan=fs.span;

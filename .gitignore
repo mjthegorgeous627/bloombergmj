@@ -28,3 +28,4 @@ _scratch_check.txt
 *.pptm
 order_locks/
 stop_automation.flag
+cycle_state.json

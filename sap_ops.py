@@ -82,6 +82,27 @@ WATCHDOG_BUSINESS_HOUR_END = 20
 WATCHDOG_CONSEC_FAILURE_CYCLES = 2   # 연속 전세션 연결 실패 사이클 수 → mtime staleness와 무관하게 재시작
 STOP_AUTOMATION_FLAG = BASE_DIR / "stop_automation.flag"
 
+# 2026-09-17: 사이클 "진행 중" 도중 멈추는 새 증상(get_sap_session() 등 SAP GUI
+# Scripting 호출이 예외 없이 그냥 영원히 블로킹) 전용 감지. main.py가 cycle_state.json에
+# running/idle을 기록한다 - 사이클 사이 정상 유휴 시간(최대 20분)과 달리 "running"
+# 상태로 오래 멈춰있는 건 정상적으로 있을 수 없으므로 훨씬 짧은 기준으로 잡아도
+# 오탐이 없다. WATCHDOG_STALE_MINUTES(30분)보다 훨씬 빠르게 잡는 게 목적.
+WATCHDOG_CYCLE_HANG_SECONDS = 3 * 60
+CYCLE_STATE_FILE = BASE_DIR / "cycle_state.json"
+
+
+def _watchdog_cycle_hung_seconds():
+    """cycle_state.json이 "running" 상태로 얼마나 오래 멈춰있는지(초). 유휴
+    상태이거나 파일이 없거나 형식이 깨졌으면 None (모두 "안 멈췄음"으로 취급)."""
+    try:
+        state = json.loads(CYCLE_STATE_FILE.read_text(encoding="utf-8"))
+        if state.get("status") != "running":
+            return None
+        since = datetime.fromisoformat(state["since"])
+        return (datetime.now() - since).total_seconds()
+    except Exception:
+        return None
+
 
 def _watchdog_log_stale_seconds():
     if not LOG_FILE.exists():
@@ -179,6 +200,16 @@ def _watchdog_restart_loop(reason):
             STOP_AUTOMATION_FLAG.unlink()
         except Exception:
             pass
+    # 죽은 이전 프로세스가 남긴 "running" 상태가 그대로면, 새로 뜬 프로세스가
+    # 자기 첫 사이클을 시작하기 전(세션 4개 재설정에 보통 1분 내외 걸림) 그 낡은
+    # running 상태를 자기 것으로 오인해 워치독이 곧바로 다시 "멈췄다"고 오판할 수
+    # 있다 - WATCHDOG_RESTART_COOLDOWN_SEC(8분)이 이미 막아주지만, 상태도 같이
+    # 지워 이중으로 방지한다.
+    if CYCLE_STATE_FILE.exists():
+        try:
+            CYCLE_STATE_FILE.unlink()
+        except Exception:
+            pass
     try:
         proc = subprocess.Popen(
             [sys.executable, "startup.py"], cwd=str(BASE_DIR), creationflags=subprocess.CREATE_NO_WINDOW,
@@ -216,10 +247,14 @@ def _sap_loop_watchdog_thread():
         is_stale = stale is not None and stale > WATCHDOG_STALE_MINUTES * 60
         consec_fail = _watchdog_consecutive_total_failures()
         is_flatlined = consec_fail >= WATCHDOG_CONSEC_FAILURE_CYCLES
-        if not (is_stale or is_flatlined):
+        cycle_hung_sec = _watchdog_cycle_hung_seconds()
+        is_cycle_hung = cycle_hung_sec is not None and cycle_hung_sec > WATCHDOG_CYCLE_HANG_SECONDS
+        if not (is_stale or is_flatlined or is_cycle_hung):
             continue
 
-        if is_stale:
+        if is_cycle_hung:
+            reason = f"사이클 진행 중 {int(cycle_hung_sec)}초째 무응답 감지 (SAP GUI Scripting 블로킹 추정)"
+        elif is_stale:
             reason = f"automation.log {WATCHDOG_STALE_MINUTES}분 이상 무갱신 감지"
         else:
             reason = f"연속 {consec_fail}회 전세션 SAP 연결 실패 감지"

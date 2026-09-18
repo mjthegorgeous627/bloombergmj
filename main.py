@@ -171,8 +171,12 @@ def run_once(excel_only=False):
     감싸서 자동화가 프로그램적으로 창을 앞으로 가져오는 것만 막는다. 사용자가
     SAP 창을 직접 클릭하는 건 이 락과 무관하게 항상 그대로 작동한다(focus_guard.py
     설명 참고). 실제 작업은 그대로 _run_once_impl()가 한다."""
-    with ForegroundLock():
-        _run_once_impl(excel_only=excel_only)
+    _mark_cycle_state("running")
+    try:
+        with ForegroundLock():
+            _run_once_impl(excel_only=excel_only)
+    finally:
+        _mark_cycle_state("idle")
 
 
 def _run_once_impl(excel_only=False):
@@ -449,12 +453,34 @@ TRIGGER_FILES = {
     for i in range(4)
 }
 
+# 2026-09-17: automation.log의 mtime만 보는 기존 워치독(sap_ops.py)은 사이클
+# 사이 정상 유휴 시간(최대 REFRESH_INTERVAL_MINUTES분)까지 감안해야 해서 무갱신
+# 기준이 30분으로 느슨하다 - 오늘 실측된 새 증상(get_sap_session() 등 SAP GUI
+# Scripting 호출이 예외 없이 그냥 영원히 블로킹, SapGuiServer.exe 자체가
+# Responding=False로 멈춤)은 사이클 "진행 중"에 일어나는데, 그걸 30분간 못 잡으면
+# 화면이 그만큼 오래 먹통으로 방치된다. 진행 중/유휴 상태를 별도 파일에 기록해서,
+# 워치독이 "진행 중인데 오래 멈췄다"만 훨씬 짧은 기준(수 분)으로 따로 잡게 한다 -
+# 유휴 구간의 자연스러운 침묵과는 구분되므로 오탐 없이 감지 속도만 개선된다.
+CYCLE_STATE_FILE = os.path.join(os.path.dirname(__file__), "cycle_state.json")
+
+
+def _mark_cycle_state(status):
+    try:
+        with open(CYCLE_STATE_FILE, "w", encoding="utf-8") as fh:
+            json.dump({"status": status, "since": datetime.now().isoformat()}, fh)
+    except Exception:
+        pass
+
 
 def _run_session(sess_idx):
     """개별 세션 단독 실행. run_once()와 같은 이유로 ForegroundLock 적용 -
     실제 작업은 _run_session_impl()가 한다."""
-    with ForegroundLock():
-        _run_session_impl(sess_idx)
+    _mark_cycle_state("running")
+    try:
+        with ForegroundLock():
+            _run_session_impl(sess_idx)
+    finally:
+        _mark_cycle_state("idle")
 
 
 def _run_session_impl(sess_idx):
