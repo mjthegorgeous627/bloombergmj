@@ -198,24 +198,45 @@ def _get_pack_rows(page, material):
 
 
 def _fill_pack_qty(page, items):
-    """Fill Pack Qty for each item, splitting its qty across however many
-    rows Portal actually rendered for that material (see _get_pack_rows()'s
-    comment) instead of assuming one row per item / one combined row per
-    material."""
-    consumed = {}
+    """Fill Pack Qty for each distinct material, splitting its TOTAL qty
+    across however many rows Portal actually rendered for that material
+    (see _get_pack_rows()'s comment) instead of assuming one row per item
+    entry / one combined row per material.
+
+    Real incident (2026-09-21, OBD 92180854, LED monitor material 10064766
+    qty=2): the caller's items list had this material split across TWO
+    entries (one per serial, qty=1 each - see _resolve_from_excel() in
+    portal_ship_and_print.py, which emits one item per Excel row), but
+    Portal rendered it as ONE combined row (Delivery/Remaining Qty=2). The
+    previous version consumed one Portal row per items-list ENTRY: the
+    first entry (qty=1) grabbed the material's only row and wrote Pack
+    Qty=1, then the second entry (qty=1) found no row left for that
+    material and raised - leaving Pack Qty stuck at 1 instead of the
+    correct 2. This is the mirror image of the 2026-08-21 bug (items had
+    ONE entry but Portal split into multiple rows). Fixing it for good
+    requires ignoring how many items-list entries a material has and
+    instead summing their qty into one total per material up front, then
+    distributing that total across Portal's actual rows - handling either
+    direction of items-vs-rows mismatch."""
+    totals = {}
+    order = []
     for item in items:
         material = item["material"]
         qty = int(float(item.get("qty") or 1))
-        start = consumed.get(material, 0)
-        rows = _get_pack_rows(page, material)[start:]
+        if material not in totals:
+            totals[material] = 0
+            order.append(material)
+        totals[material] += qty
+
+    for material in order:
+        qty = totals[material]
+        rows = _get_pack_rows(page, material)
         if not rows:
             raise RuntimeError(f"Pack Qty 입력칸을 찾지 못했습니다: material={material}")
         remaining_qty = qty
-        rows_used = 0
         for row in rows:
             if remaining_qty <= 0:
                 break
-            rows_used += 1
             if row["disabled"]:
                 logger.info("Pack Qty 이미 비활성화됨: material=%s row=%s", material, row["index"])
                 continue
@@ -224,7 +245,6 @@ def _fill_pack_qty(page, items):
             page.locator(selector).fill(str(take), timeout=8000)
             logger.info("Pack Qty 입력 완료: material=%s row=%s qty=%s", material, row["index"], take)
             remaining_qty -= take
-        consumed[material] = start + rows_used
         if remaining_qty > 0:
             raise RuntimeError(
                 f"Material {material}: Pack Qty {qty} 중 {remaining_qty}만큼 채울 행이 부족합니다 "
