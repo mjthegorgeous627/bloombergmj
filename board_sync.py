@@ -427,7 +427,7 @@ def _order_is_open(item_rows):
     거기서 판단한다. 2026-08-31 발견: 이게 없어서 sync()가 "과거 날짜=완료된
     날짜"로 잘못 취급해, 아직 처리 중인 과거 오더까지 새 시트에서 통째로
     누락시키는 버그가 있었다(실사용자가 손으로 이월해온 것과 다른 동작)."""
-    return any((it['board_status'] or '') not in ('done', 'cancelled') for it in item_rows)
+    return any((it['board_status'] or '') not in ('done', 'cancelled', 'billed') for it in item_rows)
 
 
 def _already_in_sheet(section_text, order_row):
@@ -480,6 +480,7 @@ _STATUS_BG_RGB = {
     'done': (191, 219, 254),      # #bfdbfe
     'pending': (254, 202, 202),   # #fecaca
     'cancelled': (209, 213, 219),  # #d1d5db
+    'billed': (187, 247, 208),     # #bbf7d0 (초록, 대시보드 집계 제외)
 }
 _STATUS_FONT_RGB = {'cancelled': (107, 114, 128)}  # #6b7280
 

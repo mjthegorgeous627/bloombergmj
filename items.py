@@ -303,6 +303,94 @@ def add_manual_note(cells, target_date=None, item_type=None, order_label=None, c
     return {"orderId": order_id}
 
 
+def copy_items(item_ids):
+    """Duplicate each checked row into a free-standing copy inserted directly
+    below its source (2026-09-22 user request: "행 체크하고 복사, 바로 아래
+    생기게"). Mirrors add_manual_note()'s safety rule rather than cloning the
+    source order_id: order_no is always left blank on the copy and
+    delivery_no stays NULL, so a copy of a REAL SAP order's row never forges
+    a second row automation (Portal/ZREC/POD, all keyed off order_no+
+    delivery_no) could mistake for the live one, and never collides with
+    orders' UNIQUE(order_no, delivery_no) - same reasoning as that function's
+    own docstring. " (복사)" is appended to the visible label so it reads
+    differently from the original at a glance. Everything else a user would
+    actually want carried over (customer/phone/address/memo/description/
+    material/serial/qty/mode/item_type/date/manual_cell_count) is copied as-is;
+    board_status resets to '' since a copy is a fresh unprocessed row, not a
+    completed one.
+
+    Positioning: board_pos is re-densified for the whole affected date
+    section after each insert (same dense-0..N-1 scheme reorder_items() uses)
+    so "right below the source" survives a reload instead of relying on
+    (order_id, line_no) tie-breaking. Copying several checked rows in one
+    call inserts each copy right below its OWN source, not bunched at the
+    end - the section is re-read fresh on every iteration.
+    """
+    item_ids = [int(i) for i in item_ids if str(i).strip()]
+    if not item_ids:
+        return {"items": []}
+    ensure_db()
+    created = []
+    with connect() as con:
+        for item_id in item_ids:
+            item = con.execute(
+                "SELECT * FROM order_items WHERE id=? AND deleted_at IS NULL", (item_id,)
+            ).fetchone()
+            if not item:
+                continue
+            order = con.execute("SELECT * FROM orders WHERE id=?", (item["order_id"],)).fetchone()
+            if not order:
+                continue
+            eff_date = item["item_date"] or order["source_date"] or ""
+            order_label = f"{order['order_type'] or ''} {order['order_no'] or ''}".strip() or (order["order_type"] or "memo")
+            cur = con.execute(
+                """
+                INSERT INTO orders(order_no, delivery_no, order_type, customer, phone, address, memo,
+                    status, source_sheet, source_date, created_at, updated_at, manual_cell_count)
+                VALUES ('', NULL, ?, ?, ?, ?, ?, 'new', 'manual-copy', ?, ?, ?, ?)
+                """,
+                (
+                    order_label + " (복사)", order["customer"], order["phone"], order["address"], order["memo"],
+                    eff_date, now_text(), now_text(), order["manual_cell_count"],
+                ),
+            )
+            new_order_id = cur.lastrowid
+            cur2 = con.execute(
+                """
+                INSERT INTO order_items(order_id, line_no, description, material, serial, qty, mode, item_type, item_date, board_status)
+                VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, '')
+                """,
+                (
+                    new_order_id, item["description"], item["material"], item["serial"], item["qty"],
+                    item["mode"], item["item_type"], eff_date,
+                ),
+            )
+            new_item_id = cur2.lastrowid
+            add_event(con, new_order_id, f"행 복사 (원본 item#{item_id})")
+
+            section_rows = con.execute(
+                """
+                SELECT i.id FROM order_items i JOIN orders o ON o.id = i.order_id
+                WHERE i.deleted_at IS NULL
+                  AND COALESCE(NULLIF(i.item_date, ''), o.source_date) = ?
+                ORDER BY (i.board_pos IS NULL), i.board_pos, i.order_id, i.line_no
+                """,
+                (eff_date,),
+            ).fetchall()
+            ids = [r["id"] for r in section_rows if r["id"] != new_item_id]
+            try:
+                insert_at = ids.index(item_id) + 1
+            except ValueError:
+                insert_at = len(ids)
+            ids.insert(insert_at, new_item_id)
+            con.executemany(
+                "UPDATE order_items SET board_pos=? WHERE id=?",
+                [(pos, iid) for pos, iid in enumerate(ids)],
+            )
+            created.append({"sourceItemId": item_id, "orderId": new_order_id, "itemId": new_item_id})
+    return {"items": created}
+
+
 ITEM_EDIT_FIELDS = ("description", "material", "serial", "mode", "item_type")
 # item_type added 2026-08-26 - the board's Type dropdown (배송/회수/Bloomberg/
 # Delayed/회수 Delayed/custom, see allTypeOptions() on the client) changed

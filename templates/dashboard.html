@@ -99,6 +99,11 @@ body{margin:0}
 .btn.finish:hover{background:#1e293b}
 .btn.muted{background:#6b7280;color:#fff;border-color:#6b7280}
 .btn.muted:hover{background:#4b5563}
+.btn.billed{background:#16a34a;color:#fff;border-color:#16a34a}
+.btn.billed:hover{background:#15803d}
+.btn.billed.tiny{padding:2px 6px;font-size:10.5px;width:auto;display:inline-block;margin:3px 0 0 0}
+.item-row.row-billed td{background:#bbf7d0}
+.item-row.row-billed:hover td{background:#86efac}
 .btn .hint{font-size:10.5px;font-weight:400;opacity:.8;display:block;margin-top:1px}
 .merge-field-row{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:11.5px;color:#475569;
   margin:2px 0 7px;padding:6px 8px;background:#f8fafc;border:1px solid var(--line);border-radius:7px}
@@ -274,7 +279,7 @@ tbody.date-group.collapsed .item-row,tbody.date-group.collapsed .empty-row{displ
 </head>
 <body>
 <div class="sticky-top">
-<div class="topbar"><h1>Bloomberg Dashboard Seoul</h1><div class="topbar-right"><a href="/notes" style="color:#cbd5e1;text-decoration:none;font-size:11.5px;border:1px solid #475569;border-radius:5px;padding:3px 8px" title="오더/날짜와 무관한 잡메모(링크, 전화번호 등)">📌 메모</a><div id="calWrap"><button type="button" class="cal-toggle-btn" onclick="toggleCalendarPanel(event)" title="자동화 비운영일 달력 - 빨간 숫자는 주말/공휴일(또는 수동 지정)이라 그날 SAP 자동화가 돌지 않습니다. 숫자를 클릭하면 수동으로 빨간날을 지정/해제할 수 있습니다">📅</button><div id="calPanel"></div></div><div id="sapLoopWrap"><div id="sapLoopStatus" onclick="toggleSapLoopMenu(event)"><span class="dot"></span><span class="txt">SAP 루프 확인 중...</span></div><div id="sapLoopMenu">
+<div class="topbar"><h1>Bloomberg Dashboard Seoul</h1><div class="topbar-right"><a href="/history" target="_blank" style="color:#cbd5e1;text-decoration:none;font-size:11.5px;border:1px solid #475569;border-radius:5px;padding:3px 8px" title="2017년부터 마감된 배송 이력을 시리얼/오더번호로 검색">🔍 이력</a><a href="/notes" style="color:#cbd5e1;text-decoration:none;font-size:11.5px;border:1px solid #475569;border-radius:5px;padding:3px 8px" title="오더/날짜와 무관한 잡메모(링크, 전화번호 등)">📌 메모</a><div id="calWrap"><button type="button" class="cal-toggle-btn" onclick="toggleCalendarPanel(event)" title="자동화 비운영일 달력 - 빨간 숫자는 주말/공휴일(또는 수동 지정)이라 그날 SAP 자동화가 돌지 않습니다. 숫자를 클릭하면 수동으로 빨간날을 지정/해제할 수 있습니다">📅</button><div id="calPanel"></div></div><div id="sapLoopWrap"><div id="sapLoopStatus" onclick="toggleSapLoopMenu(event)"><span class="dot"></span><span class="txt">SAP 루프 확인 중...</span></div><div id="sapLoopMenu">
   <button onclick="runSap('start');closeSapLoopMenu()">SAP 루프 시작</button>
   <button onclick="runSap('stop');closeSapLoopMenu()">SAP 루프 중지</button>
   <hr>
@@ -340,6 +345,7 @@ tbody.date-group.collapsed .item-row,tbody.date-group.collapsed .empty-row{displ
         <button class="btn block muted" onclick="processCancel()" title="체크된 행 전체 취소 (회색) - 행 전체에 표시, 삭제되지는 않음">Cancel</button>
         <button class="btn block" onclick="processReset()" title="체크된 행을 Done/Ready/Cancel 이전 상태(흰색)로 되돌림 - 잘못 완료 처리됐거나 아직 진행 안 된 행을 표시 없는 상태로 초기화">초기화</button>
       </div>
+      <button class="btn block billed tiny" onclick="processBilled()" title="회수 오더가 안 돼서 고객에게 비용을 청구한 상태로 표시 (초록) - 마감 파일엔 들어가지만 대시보드 수량에는 집계되지 않음">billed</button>
     </div>
   </div>
   <div class="ctrl-col" id="col-excel">
@@ -367,6 +373,7 @@ tbody.date-group.collapsed .item-row,tbody.date-group.collapsed .empty-row{displ
     <div class="ctrl-col-body">
       <div class="btn-grid">
         <button class="btn block" onclick="addManualRow()" title="오더 가져오기 없이, 텍스트만으로 새 행 1개를 오늘 날짜에 추가 - 실제 SAP 오더가 아니므로 Portal/ZREC 등 자동화 버튼 대상으로는 쓰지 마세요. 다른 날짜로 옮기려면 추가된 뒤 체크하고 아래 Excel 칸의 날짜 이동을 쓰세요">0. 메모 행 추가</button>
+        <button class="btn block" onclick="copyChecked()" title="체크된 행을 각각 바로 아래에 복사 - 실제 SAP 오더가 아닌 새 행으로 생기므로(메모 행과 동일) Portal/ZREC 등 자동화 버튼 대상으로는 쓰지 마세요">체크된 행 복사</button>
         <button class="btn block" onclick="deleteChecked()" title="workbench.db에서도 삭제됨 - 실행취소로 되돌리기 가능">1. 체크된 행 삭제</button>
       </div>
       <div class="merge-field-row">
@@ -1610,7 +1617,7 @@ function buildGroupRows(group, allSpans, gi){
   };
   group.rows.forEach((row, i)=>{
     const tr=document.createElement('tr');
-    tr.className='item-row'+(row.uiStatus==='done'?' row-done':row.uiStatus==='pending'?' row-pending':row.uiStatus==='cancelled'?' row-cancelled':'')
+    tr.className='item-row'+(row.uiStatus==='done'?' row-done':row.uiStatus==='pending'?' row-pending':row.uiStatus==='cancelled'?' row-cancelled':row.uiStatus==='billed'?' row-billed':'')
       +((row.portalError||row.podError||row.snReloError)?' row-error':'');
     tr.dataset.rowKey=row.rowKey;
     // group.key (same value mergeKey(row) would give) stamped on every row of
@@ -2039,10 +2046,16 @@ function renderAll(){
       // 함" 사용자 지적). 이제 체크(on)할 때는 board_status가 'done'(파랑)인
       // 행만 자동으로 체크하고, 나머지(대기/취소/미지정)는 그대로 둔다 -
       // 끌 때(off)는 상태 무관하게 전부 해제(선택 취소는 항상 안전하므로).
+      //
+      // 2026-09-28: 'cancelled'(회색)도 'done'과 함께 자동 체크 대상에 추가.
+      // 취소 건(예: ZRX 67099736 bunit 캔슬)은 위의 "아직 미확정" 케이스가
+      // 아니라 이미 처리가 끝난 상태라 done과 똑같이 마감 대상이어야 하는데,
+      // 09-02 수정이 done만 남기면서 cancelled까지 같이 걸러져 마감에서
+      // 누락되고 있었다(사용자 지적으로 발견).
       tbody.querySelectorAll('.row-check').forEach(cb=>{
         if(!exportCb.checked){ cb.checked=false; return; }
         const row=ROWS.find(r=>r.rowKey===cb.dataset.rowKey);
-        cb.checked = !!(row && row.uiStatus==='done');
+        cb.checked = !!(row && (row.uiStatus==='done' || row.uiStatus==='cancelled' || row.uiStatus==='billed'));
       });
     });
     const toggleBtn=document.createElement('button');
@@ -2354,6 +2367,21 @@ async function processCancel(){
   renderAll();
   toast(keys.length+'건 취소 처리(회색) - DB에 반영됨');
 }
+// 2026-09-29: "billed" - 회수 오더가 안 돼서 고객에게 비용을 청구한 상태(초록).
+// 자주 안 쓰는 버튼이라 작게 배치. 마감 파일엔 들어가지만 엑셀에서 파랑이
+// 아닌 초록으로 찍혀 vendor_dashboard.py 수량 집계에서 자동 제외된다.
+async function processBilled(){
+  const keys=[...document.querySelectorAll('.row-check:checked')].map(cb=>cb.dataset.rowKey);
+  if(!keys.length){toast('체크된 행이 없습니다');return}
+  const itemIds=ROWS.filter(r=>keys.includes(r.rowKey)).map(r=>r.itemId);
+  try{
+    await persistItemStatus(itemIds, 'billed');
+  }catch(err){toast('billed 저장 실패: '+err.message);return}
+  keys.forEach(k=>{const row=ROWS.find(r=>r.rowKey===k); if(row) row.uiStatus='billed'});
+  clearRowErrorFlags(itemIds);
+  renderAll();
+  toast(keys.length+'건 billed 처리(초록) - 대시보드 수량 제외');
+}
 // 2026-08-20: "초기화" - Done/Ready to process/Cancel을 누른 적 없는
 // 원래 상태(흰색, board_status='')로 되돌림. 실사고 계기: ZRX 67079036 -
 // 배송은 완료했지만 회수는 다음날로 미뤄졌는데 같은 오더 안에서 함께
@@ -2576,6 +2604,11 @@ function buildExportRows(iso, checkedRowKeys){
         // each field's <td> (i===0 && isFirst, same rows mergeFirst already
         // marks), which is exactly where the highlight was ever recorded.
         highlights: row.highlights || {},
+        // 2026-09-28: cancelled(회색) 행도 마감 대상에 포함되면서 추가 - 엑셀
+        // 쪽에서 완료(파랑)와 구분되는 색으로 찍어야 vendor_dashboard.py의
+        // 색상 기반 집계에서 잘못 카운트되지 않는다 (_write_export_sheet 참고).
+        cancelled: row.uiStatus==='cancelled',
+        billed: row.uiStatus==='billed',
       });
     });
   });
@@ -2736,6 +2769,7 @@ async function syncDeliveryExcel(){
   toast(result.added>0 ? `배송장 ${result.sheet}시트에 ${result.added}건 반영 완료` : '이미 최신 상태 (추가할 오더 없음)');
 }
 
+
 // -- 월초 작업 1) 퀵 금액 정리 (2026-10-01): quick_settlement 저장소의 스크립트를
 // draft(사본 미리보기) -> 확인 -> apply(원본 반영) 순서로 호출한다.
 async function runQuickSettlement(){
@@ -2835,6 +2869,30 @@ async function deleteChecked(){
   checkedDates.forEach(iso=>EXPORT_DATES.delete(iso));
   renderAll();
   toast(keys.length+'건 삭제 (DB에 반영됨)');
+}
+
+// -- Copy: each checked row gets duplicated into a fresh standalone row
+// (order_no blank, same safety rule as the manual memo row - see
+// copy_items()'s docstring) inserted directly below itself. Position is
+// computed server-side (re-densifies board_pos for the affected date
+// section per copy), so the simplest correct way to pick it up is the same
+// full reload submitManualRow()/mergeChecked() already use after a
+// server-side row insert, rather than half-reconstructing board_row()'s
+// highlights/mergeGroups shape here on the client. --
+async function copyChecked(){
+  const keys=[...document.querySelectorAll('.row-check:checked')].map(cb=>cb.dataset.rowKey);
+  if(!keys.length){toast('체크된 행이 없습니다');return}
+  const itemIds=ROWS.filter(r=>keys.includes(r.rowKey)).map(r=>r.itemId);
+  let data;
+  try{
+    const res=await fetch('/api/items/copy', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({itemIds})
+    });
+    data=await res.json();
+    if(!res.ok || data.error) throw new Error(data.error||'복사 실패');
+  }catch(err){toast('복사 실패: '+err.message);return}
+  toast((data.items||[]).length+'건 복사됨');
+  location.reload();
 }
 
 // -- Drag-and-drop between date sections (nearby dates) --

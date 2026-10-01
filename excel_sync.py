@@ -564,6 +564,14 @@ _KOREAN_WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 _EXPORT_COL_WIDTHS = {1: 23.375, 2: 40.0, 3: 13.75, 4: 14.5, 5: 16.625, 6: 19.875, 7: 47.75, 8: 25.125}
 _EXPORT_HEADER_FILL = PatternFill(fill_type="solid", fgColor="FBE3D6")
 _EXPORT_DATA_FILL = PatternFill(fill_type="solid", fgColor="00B0F0")
+# 취소(cancelled) 행 채우기 - vendor_dashboard.py의 _is_completed_row()가 이 파일의
+# 셀 색으로 "완료"(파란 00B0F0)와 "취소"(회색, 카운트 제외)를 구분한다(원래
+# 수기로 관리하던 배송장의 오래된 규칙). 예전엔 취소 행이 마감 체크박스에서
+# 자동 선택 안 돼 이 파일에 거의 안 들어왔지만, 2026-09-28에 취소 행도
+# 마감 대상에 포함시키면서 색 구분 없이 그대로 두면 취소 건이 파란색으로
+# 찍혀 완료로 잘못 집계될 뻔했다 - 따로 회색을 넣어 막는다.
+_EXPORT_CANCELLED_FILL = PatternFill(fill_type="solid", fgColor="D9D9D9")
+_EXPORT_BILLED_FILL = PatternFill(fill_type="solid", fgColor="92D050")  # billed: 대시보드 집계(00B0F0 기준) 제외
 _EXPORT_THIN_BORDER = Border(*(Side(style="thin"),) * 4)
 _EXPORT_COL_ALIGN = {
     1: Alignment(vertical="top", wrap_text=True),
@@ -668,13 +676,15 @@ def _write_export_sheet(wb, sheet_name, iso, rows):
             8: (row.get("memo") or "") if mf.get("memo", True) else "",
         }
         highlights = row.get("highlights") or {}
+        default_fill = (_EXPORT_CANCELLED_FILL if row.get("cancelled")
+                        else _EXPORT_BILLED_FILL if row.get("billed") else _EXPORT_DATA_FILL)
         for col in range(1, 9):
             cell = ws.cell(row=r, column=col)
             cell.value = values[col]
             style = next(
                 (highlights[f] for f in _EXPORT_HIGHLIGHT_FIELDS_BY_COL[col] if highlights.get(f)), None
             )
-            cell.fill = _EXPORT_HIGHLIGHT_FILL.get((style or {}).get("bg"), _EXPORT_DATA_FILL)
+            cell.fill = _EXPORT_HIGHLIGHT_FILL.get((style or {}).get("bg"), default_fill)
             font_kwargs = {}
             if col == 8:
                 font_kwargs["bold"] = True
@@ -756,10 +766,23 @@ def export_dates_to_excel(dates_payload):
             result[iso] = {"sheet": sheet_name, "rows": len(rows)}
         wb.save(excel_path)
         _trigger_dashboard_refresh(list(dates_payload.keys()))
+        _trigger_history_reindex(excel_path)
         _mirror_finalize_to_shared_excel(dates_payload)
         return {"exported": result, "backup": str(backup_path)}
     finally:
         wb.close()
+
+
+def _trigger_history_reindex(excel_path):
+    """마감 직후 방금 저장된 마감 파일을 이력 검색 색인(history.db)에 반영한다
+    (2026-10-01). 백그라운드 스레드라 마감 자체를 막지 않고, 실패해도 마감은
+    정상 완료된 상태다."""
+    try:
+        import history_search
+
+        history_search.reindex_async(files=[Path(excel_path)])
+    except Exception:
+        logger.warning("이력 검색 색인 갱신 실행 실패 (마감 자체는 정상 완료됨)", exc_info=True)
 
 
 def _mirror_finalize_to_shared_excel(dates_payload):

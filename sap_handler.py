@@ -1197,10 +1197,12 @@ def _compact_delivery_row_qty(qty, item):
     return [(1, '') for _ in range(qty_int)]
 
 
-def build_excel_rows(ebeln, order_info, address, extra_orders, memo):
+def build_excel_rows(ebeln, order_info, address, extra_orders, memo, one_row_per_material=False):
     """
     하나의 오더에서 Excel 입력용 행 리스트 생성.
     아이템 1개 × 수량 = 행 수
+    one_row_per_material=True(수출/해외 내부배송): 수량과 상관없이 자재당 1행,
+    description 뒤에 " x N ea"를 붙이고 quantity에 실제 수량을 넣는다.
     """
     rows = []
     is_first = True
@@ -1212,7 +1214,14 @@ def build_excel_rows(ebeln, order_info, address, extra_orders, memo):
         except (ValueError, TypeError):
             qty = 1
 
-        for row_qty, serial_number in _compact_delivery_row_qty(qty, item):
+        if one_row_per_material:
+            row_specs = [(qty, '')]
+        else:
+            row_specs = _compact_delivery_row_qty(qty, item)
+        for row_qty, serial_number in row_specs:
+            desc = item['arktx']
+            if one_row_per_material and qty > 1:
+                desc = f"{desc} x {qty} ea"
             rows.append({
                 'order_prefix': '배송',
                 'order_type':   order_type,
@@ -1220,7 +1229,7 @@ def build_excel_rows(ebeln, order_info, address, extra_orders, memo):
                 'obd':          item.get('vbeln') or order_info.get('vbeln', ''),
                 'extra_orders': extra_orders,
                 'material':     item['matnr'],
-                'description':  item['arktx'],
+                'description':  desc,
                 'quantity':     row_qty,
                 'serial_number': serial_number,
                 'customer':     address.get('customer', ''),

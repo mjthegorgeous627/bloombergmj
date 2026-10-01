@@ -4,6 +4,7 @@ VL10G 핸들러.
 - ZRE(회수만) 오더 → 회수 정보 수집
 """
 
+import re
 import time
 import logging
 from datetime import date
@@ -353,6 +354,39 @@ def release_delivery_block(session, grid_idx, orig_doc):
         return False, msg
 
 
+def _title_matches_order(title, orig_doc):
+    """화면 타이틀에 orig_doc 오더번호가 실제로 포함돼 있는지 확인
+    (SAP가 앞자리 0을 채워 표시하는 경우 대비, 양쪽 다 lstrip('0') 비교)."""
+    target = str(orig_doc or '').lstrip('0')
+    if not target:
+        return False
+    return any(num.lstrip('0') == target for num in re.findall(r'\d{5,}', title or ''))
+
+
+def _wait_for_order_screen(session, orig_doc, max_wait=4.0, interval=0.5):
+    """
+    그리드 클릭/VA02 진입 "성공" 판정(상태바 빈값 + 목록화면 아님) 이후에도
+    SAP 화면 갱신이 늦어 타이틀이 여전히 이전 오더를 가리키는 경우가 있다
+    (2026-09-28 오더 67098567 처리 중 화면이 아직 67067399 그대로인 상태에서
+    주소를 읽어 엉뚱한 은행(Shinhan)이 수집된 사고). 타이틀이 실제로 orig_doc로
+    바뀔 때까지 짧게 폴링해서, 이전 오더 잔상을 그대로 읽어버리는 것을 막는다.
+    반환: (True, title) | (False, 마지막으로 읽은 title)
+    """
+    elapsed = 0.0
+    title = ''
+    while True:
+        try:
+            title = session.findById("wnd[0]").Text
+        except Exception:
+            title = ''
+        if _title_matches_order(title, orig_doc):
+            return True, title
+        if elapsed >= max_wait:
+            return False, title
+        time.sleep(interval)
+        elapsed += interval
+
+
 def _enter_zre_order(session, grid_idx, orig_doc):
     """
     ZRE 오더 진입: VL10G 그리드 클릭 → 실패시 VA02 fallback.
@@ -366,9 +400,13 @@ def _enter_zre_order(session, grid_idx, orig_doc):
         time.sleep(1.5)
         sbar_msg = _read_status_bar(session)
         if not sbar_msg and not is_on_vl10g_list(session):
-            logger.info(f"  오더 {orig_doc} 그리드 클릭 진입 성공")
-            return 'grid', True
-        logger.warning(f"  그리드 클릭 진입 실패 (sbar='{sbar_msg}') → VA02 시도")
+            ok, title = _wait_for_order_screen(session, orig_doc)
+            if ok:
+                logger.info(f"  오더 {orig_doc} 그리드 클릭 진입 성공")
+                return 'grid', True
+            logger.warning(f"  그리드 클릭 진입했지만 화면이 아직 다른 오더('{title}') → VA02 시도")
+        else:
+            logger.warning(f"  그리드 클릭 진입 실패 (sbar='{sbar_msg}') → VA02 시도")
         try:
             session.findById("wnd[0]").sendVKey(3)
         except Exception:
@@ -385,9 +423,13 @@ def _enter_zre_order(session, grid_idx, orig_doc):
         time.sleep(1.5)
         sbar_msg = _read_status_bar(session)
         if not sbar_msg and not is_on_vl10g_list(session):
-            logger.info(f"  오더 {orig_doc} VA02 진입 성공")
-            return 'va02', True
-        logger.warning(f"  VA02 진입 실패: sbar='{sbar_msg}'")
+            ok, title = _wait_for_order_screen(session, orig_doc)
+            if ok:
+                logger.info(f"  오더 {orig_doc} VA02 진입 성공")
+                return 'va02', True
+            logger.warning(f"  VA02 진입했지만 화면이 아직 다른 오더('{title}')")
+        else:
+            logger.warning(f"  VA02 진입 실패: sbar='{sbar_msg}'")
         try:
             session.findById("wnd[0]").sendVKey(3)
         except Exception:

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Manual single-order import.
 
 Usage:
@@ -227,6 +227,44 @@ def _write_and_notify(rows, order_num):
     save_processed(processed)
 
 
+def _run_delivery_only_order(session, order_num):
+    """2026-09-30: 4-prefix(구매오더 4500751771 등, 홍콩 등 해외 내부배송 STO)는
+    SD 판매오더가 아니라 VA02/VA03로 조회가 안 된다. VL06O에서 Pur.Doc을 더블클릭하면
+    열리는 배송문서(VL03N)에서 수집하는 기존 process_new_orders() 방식과 같은 경로:
+    VL06O 그리드(세션 0, 읽기 전용)에서 해당 오더의 배송번호/아이템을 얻고, 새 세션에서
+    VL03N으로 그 배송문서를 열어 주소/텍스트를 읽는다. 반환: rows 또는 None."""
+    from portal_open_delivery import find_delivery_for_order
+    from sap_handler import (
+        get_ship_to_address, build_excel_rows, get_text_content,
+    )
+
+    ebeln, info = find_delivery_for_order(order_num)
+    vbeln = str(info.get("vbeln") or "").strip()
+    if not vbeln:
+        logger.error(f"수동 오더 {order_num}: VL06O에서 배송번호를 못 찾음")
+        return None
+
+    logger.info(f"수동 오더 {order_num}: 배송문서 경로 (VL03N {vbeln})")
+    run_transaction(session, "/nVL03N")
+    time.sleep(1)
+    session.findById("wnd[0]/usr/ctxtLIKP-VBELN").text = vbeln
+    session.findById("wnd[0]").sendVKey(0)
+    time.sleep(2)
+    title = session.findById("wnd[0]").Text
+    if vbeln not in title:
+        logger.error(f"수동 오더 {order_num}: 예상치 못한 화면 {title}")
+        return None
+
+    address = get_ship_to_address(session)
+    text = get_text_content(session)
+    extra_orders = parse_extra_orders(text) if text else []
+    memo = parse_memo_for_display(text) if text else ""
+    text_contact = parse_contact_from_text(text) if text else {'found': False}
+    if text_contact['found'] and not address.get('phone'):
+        address['phone'] = text_contact['phone']
+    return build_excel_rows(ebeln, info, address, extra_orders, memo, one_row_per_material=True)
+
+
 def run_manual_order(order_num, close_window=True):
     """Open one SAP order in a new session, extract it, and write it to Excel."""
     order_num = str(order_num).strip()
@@ -246,6 +284,17 @@ def run_manual_order(order_num, close_window=True):
 
     session = _open_new_sap_session()
     try:
+        # 45xxxxxxxx 같은 구매오더(STO)는 VA03에 없다 → 처음부터 배송문서 경로
+        if order_num.startswith("45"):
+            rows = _run_delivery_only_order(session, order_num)
+            if not rows:
+                print(f"[오더입력] {order_num} 배송문서 경로 수집 실패")
+                return False
+            _write_and_notify(rows, order_num)
+            logger.info(f"수동 오더 {order_num} workbench 반영 완료 (배송문서 경로, {len(rows)}행)")
+            print(f"[오더입력] {order_num} workbench 반영 완료 ({len(rows)}행)")
+            return True
+
         _, title = _open_order(session, order_num)
         order_type = _order_type_for(order_num, title)
 

@@ -27,6 +27,7 @@ from sap_ops import *
 from sap_ops import _sap_loop_watchdog_thread
 from portal_ops import *
 from monthly_tasks import run_quick_settlement
+import history_search
 def render_notes_page():
     """2026-08-31 사용자 요청: 오더/날짜와 무관한 잡메모(링크, 전화번호, 계정정보
     등)를 관리할 곳이 없어서 신설. 처음엔 항목별 카드+카테고리 UI로 만들었는데,
@@ -121,6 +122,26 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(payload)
                 return
+            if parsed.path == "/history":
+                payload = (TEMPLATES_DIR / "history.html").read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if parsed.path == "/api/history/search":
+                qs = parse_qs(parsed.query)
+                self.send_json(history_search.search(qs.get("q", [""])[0]))
+                return
+            if parsed.path == "/api/history/group":
+                qs = parse_qs(parsed.query)
+                detail = history_search.group_detail(int(qs.get("sheet_id", ["0"])[0]), int(qs.get("group_no", ["0"])[0]))
+                self.send_json(detail or {"error": "not found"}, 200 if detail else 404)
+                return
+            if parsed.path == "/api/history/stats":
+                self.send_json(history_search.stats())
+                return
             if parsed.path == "/api/pages":
                 self.send_json({"pages": list_pages()})
                 return
@@ -170,6 +191,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             parsed = urlparse(self.path)
+            if parsed.path == "/api/history/reindex":
+                history_search.reindex_async()
+                self.send_json({"started": True})
+                return
             if parsed.path == "/api/import/today":
                 self.send_json(load_today_from_excel())
                 return
@@ -236,6 +261,10 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/items/reorder":
                 body = self.read_json()
                 self.send_json(reorder_items(body.get("itemIds") or []))
+                return
+            if parsed.path == "/api/items/copy":
+                body = self.read_json()
+                self.send_json(copy_items(body.get("itemIds") or []))
                 return
             if parsed.path == "/api/items/merge":
                 body = self.read_json()

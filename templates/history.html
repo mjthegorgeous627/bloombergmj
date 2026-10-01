@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bloomberg Dashboard - 이력 검색</title>
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+:root{font-family:-apple-system,"Segoe UI","Malgun Gothic",Arial,sans-serif;color:#1e293b;background:#f1f4f9;
+  --line:#e2e8f0;--line-strong:#cbd5e1;--accent:#2563eb}
+body{display:flex;flex-direction:column}
+.topbar{height:38px;flex:0 0 auto;background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;display:flex;
+  align-items:center;justify-content:space-between;padding:0 18px;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.topbar h1{font-size:14.5px;margin:0;font-weight:600}
+.topbar a{color:#cbd5e1;text-decoration:none;font-size:11.5px;border:1px solid #475569;border-radius:5px;padding:3px 8px}
+.topbar a:hover{background:rgba(255,255,255,.1)}
+.searchbar{flex:0 0 auto;background:#fff;border-bottom:1px solid var(--line);padding:12px 18px;display:flex;gap:12px;align-items:center}
+.searchbar input{flex:1;max-width:640px;font-size:15px;padding:9px 12px;border:1px solid var(--line-strong);border-radius:8px;outline:none}
+.searchbar input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.meta{font-size:12px;color:#64748b}
+.main{flex:1;display:flex;min-height:0}
+.list{flex:1;overflow:auto;padding:0 0 24px}
+table{border-collapse:collapse;width:100%;font-size:12.5px;background:#fff}
+th{position:sticky;top:0;background:#f8fafc;text-align:left;padding:7px 10px;border-bottom:1px solid var(--line-strong);
+  font-size:11.5px;color:#475569;font-weight:600}
+td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top;white-space:pre-line;max-width:260px}
+tr.res{cursor:pointer}
+tr.res:hover td{background:#eff6ff}
+tr.res.sel td{background:#dbeafe}
+.k-배송{color:#1d4ed8;font-weight:600}.k-회수{color:#b45309;font-weight:600}
+mark{background:#fde68a;padding:0 1px;border-radius:2px}
+.detail{flex:0 0 440px;border-left:1px solid var(--line-strong);background:#fff;overflow:auto;padding:16px 18px;display:none}
+.detail.show{display:block}
+.detail h2{font-size:14px;margin:0 0 4px}
+.detail .src{font-size:11.5px;color:#64748b;margin-bottom:12px}
+.drow{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.drow .cap{font-size:10.5px;color:#94a3b8;margin-bottom:3px}
+.drow .f{display:flex;gap:8px;font-size:12.5px;padding:2px 0;border-top:1px dashed var(--line)}
+.drow .f:first-of-type{border-top:none}
+.drow .f b{flex:0 0 74px;color:#64748b;font-weight:500}
+.drow .f span{white-space:pre-line;word-break:break-all}
+.empty{padding:40px;text-align:center;color:#94a3b8;font-size:13px}
+@media(max-width:900px){.detail{position:fixed;inset:38px 0 0 0;flex:none}}
+</style>
+</head>
+<body>
+<div class="topbar"><h1>🔍 이력 검색 (2017~)</h1><div><a href="/">← 보드로</a></div></div>
+<div class="searchbar">
+  <input id="q" type="search" placeholder="시리얼 / 오더번호 / 자재 / 고객명 ... (띄어쓰기로 여러 단어 AND 검색)" autofocus autocomplete="off">
+  <span class="meta" id="meta"></span>
+</div>
+<div class="main">
+  <div class="list" id="list"><div class="empty">검색어를 입력하세요. 예: 시리얼 4CE511D53G, 오더 67080595</div></div>
+  <div class="detail" id="detail"></div>
+</div>
+<script>
+const LABELS=["오더/구분","자재","M/N","S/N","고객","연락처","주소","메모","","","","","",""];
+let timer=null, seq=0, cur=[];
+const $=id=>document.getElementById(id);
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function hl(text,terms){let h=esc(text);terms.forEach(t=>{if(!t)return;const re=new RegExp(esc(t).replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi");h=h.replace(re,m=>"<mark>"+m+"</mark>")});return h}
+function terms(){return $("q").value.trim().split(/\s+/).filter(Boolean)}
+async function run(){
+  const q=$("q").value.trim(), my=++seq;
+  if(!q){$("list").innerHTML='<div class="empty">검색어를 입력하세요.</div>';$("meta").textContent="";return}
+  const r=await fetch("/api/history/search?q="+encodeURIComponent(q)).then(r=>r.json());
+  if(my!==seq)return;
+  cur=r.results||[];
+  $("meta").textContent=r.total+"건"+(r.total>cur.length?" (최근 "+cur.length+"건 표시)":"");
+  if(!cur.length){$("list").innerHTML='<div class="empty">결과 없음</div>';return}
+  const t=terms();
+  $("list").innerHTML='<table><tr><th>날짜</th><th>구분</th><th>오더</th><th>자재</th><th>M/N</th><th>S/N</th><th>고객</th><th>출처</th></tr>'+
+   cur.map((x,i)=>{const c=x.cells;
+     const first=(c[0]||"").replace(/^(배송|회수)\s*/,"");
+     return '<tr class="res" data-i="'+i+'"><td>'+esc(x.sheetDate||x.sheetName)+'</td><td class="k-'+x.kind+'">'+esc(x.kind)+'</td><td>'+hl(first,t)+
+       '</td><td>'+hl(c[1]||"",t)+'</td><td>'+hl(c[2]||"",t)+'</td><td>'+hl(c[3]||"",t)+'</td><td>'+hl(c[4]||"",t)+
+       '</td><td style="color:#94a3b8">'+esc(x.sourceFile.replace(/\.xlsx$/,""))+" / "+esc(x.sheetName)+" #"+x.excelRow+'</td></tr>'}).join("")+'</table>';
+}
+$("list").addEventListener("click",async e=>{
+  const tr=e.target.closest("tr.res"); if(!tr)return;
+  document.querySelectorAll("tr.res.sel").forEach(n=>n.classList.remove("sel")); tr.classList.add("sel");
+  const x=cur[+tr.dataset.i];
+  const d=await fetch("/api/history/group?sheet_id="+x.sheetId+"&group_no="+x.groupNo).then(r=>r.json());
+  const t=terms();
+  $("detail").innerHTML='<h2>'+esc(x.sheetDate||x.sheetName)+' 배송장</h2><div class="src">'+esc(d.sourceFile)+' · 시트 "'+esc(d.sheetName)+'" · 엑셀 '+
+    d.rows.map(r=>r.excelRow).join(", ")+'행</div>'+
+    d.rows.map(r=>'<div class="drow"><div class="cap">'+esc(r.kind||"")+' · '+r.excelRow+'행</div>'+
+      r.cells.map((v,i)=>v?'<div class="f"><b>'+esc(LABELS[i]||("열"+(i+1)))+'</b><span>'+hl(v,t)+'</span></div>':"").join("")+'</div>').join("");
+  $("detail").classList.add("show");
+});
+$("q").addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(run,220)});
+fetch("/api/history/stats").then(r=>r.json()).then(s=>{$("q").placeholder+="  ["+s.rows.toLocaleString()+"행, "+(s.from||"")+" ~ "+(s.to||"")+"]"}).catch(()=>{});
+</script>
+</body>
+</html>
