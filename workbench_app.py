@@ -26,6 +26,7 @@ from items import *
 from sap_ops import *
 from sap_ops import _sap_loop_watchdog_thread
 from portal_ops import *
+from monthly_tasks import run_quick_settlement
 def render_notes_page():
     """2026-08-31 사용자 요청: 오더/날짜와 무관한 잡메모(링크, 전화번호, 계정정보
     등)를 관리할 곳이 없어서 신설. 처음엔 항목별 카드+카테고리 UI로 만들었는데,
@@ -181,6 +182,10 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/export":
                 body = self.read_json()
                 self.send_json(export_dates_to_excel(body.get("dates") or {}))
+                return
+            if parsed.path == "/api/monthly/quick_settlement":
+                body = self.read_json()
+                self.send_json(run_quick_settlement(body.get("month") or "", body.get("mode") or "draft"))
                 return
             if parsed.path == "/api/sync_delivery_excel":
                 self.send_json(sync_delivery_excel())
