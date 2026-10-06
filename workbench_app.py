@@ -195,6 +195,10 @@ class Handler(BaseHTTPRequestHandler):
                 history_search.reindex_async()
                 self.send_json({"started": True})
                 return
+            if parsed.path == "/api/history/restore":
+                body = self.read_json()
+                self.send_json(history_search.restore_to_workbench(body.get("rowIds") or [], body.get("date") or ""))
+                return
             if parsed.path == "/api/import/today":
                 self.send_json(load_today_from_excel())
                 return

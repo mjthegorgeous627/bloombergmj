@@ -89,6 +89,21 @@ def fill_sn_to_order(order_no, serial):
             session.findById("wnd[0]").close()
         except Exception:
             pass
+        # 미저장 변경이 있으면 SAP가 "저장하겠습니까?" 확인창을 띄워 세션이 안
+        # 닫힌다 - paper relo로 중단한 경우 등. 절대 Yes(저장)는 누르지 않고
+        # No(저장 안 함) 계열 버튼만 눌러 닫는다.
+        for _ in range(2):
+            try:
+                session.findById("wnd[1]")
+            except Exception:
+                break
+            try:
+                for btn in session.findById("wnd[1]/usr").Children:
+                    if (btn.Text or '').strip().lower() in ('no', '아니오', 'exit without saving'):
+                        btn.press()
+                        break
+            except Exception:
+                break
 
 
 def main():

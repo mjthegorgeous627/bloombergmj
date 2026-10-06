@@ -244,6 +244,37 @@ def _run_once_impl(excel_only=False):
     # 더 이상 여기서 엑셀 전체를 다시 긁어오지 않음)
 
 
+def _backfill_blank_obd(obd_map):
+    """workbench.db에서 Delivery#(OBD)가 빈 채 수집된 오더를, 방금 읽은 VL06O
+    스냅샷(obd_map)에 있으면 채운다 (2026-10-06 - 수집 시점엔 VL06O에 아직
+    없던 ZRX 오더의 OBD가 영영 안 채워지던 문제의 안전망). 값이 하나로
+    확정된 오더만, UNIQUE(order_no, delivery_no) 충돌이 없을 때만 갱신."""
+    try:
+        from db import connect
+
+        filled = []
+        with connect() as con:
+            rows = con.execute(
+                "SELECT id, order_no FROM orders WHERE order_no != '' AND COALESCE(delivery_no,'') = '' "
+                "AND status != 'deleted'"
+            ).fetchall()
+            for r in rows:
+                obd = obd_map.get(str(r["order_no"]))
+                if not obd or isinstance(obd, list):
+                    continue
+                clash = con.execute(
+                    "SELECT 1 FROM orders WHERE order_no=? AND delivery_no=?", (r["order_no"], obd)
+                ).fetchone()
+                if clash:
+                    continue
+                con.execute("UPDATE orders SET delivery_no=? WHERE id=?", (obd, r["id"]))
+                filled.append((r["order_no"], obd))
+        if filled:
+            logger.info(f"VL06O 스냅샷으로 OBD 백필: {filled}")
+    except Exception as exc:
+        logger.warning(f"OBD 백필 실패: {exc}")
+
+
 def _run_vl06o(session, processed):
     """VL06O: 목록에서 7/5/4-prefix 새 오더를 찾아 run_manual_order()(VA02/VA03
     직접 진입)로 수집한다. 2026-09-01부터 VL06O 자체 그리드 추출
@@ -274,6 +305,7 @@ def _run_vl06o(session, processed):
         elif unique_vbelns:
             obd_map[str(ebeln)] = unique_vbelns[0]
     logger.info(f"VL06O 전체 오더 수: {len(order_map)}")
+    _backfill_blank_obd(obd_map)
 
     # 7-prefix는 항상 VL06O에서, 5-prefix는 processed에 없는 것만
     new_orders = [

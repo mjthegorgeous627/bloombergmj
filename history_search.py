@@ -339,6 +339,41 @@ def group_detail(sheet_id, group_no):
         conn.close()
 
 
+def restore_to_workbench(row_ids, target_date=None):
+    """선택한 이력 행을 workbench 보드에 메모 행으로 되돌린다(2026-10-06 사용자 요청).
+
+    items.add_manual_note()/copy_items()와 같은 안전 규칙: order_no는 항상 빈값이라
+    과거 실제 오더를 되돌려도 자동화(Portal/ZREC/POD)가 살아있는 오더로 오인하지
+    않는다. 원래 오더번호는 Order# 라벨(order_type)에 글자로만 남긴다. 컬럼 위치가
+    연도별로 밀려 있으므로 best-effort 매핑: 0=오더/구분(접두 배송|회수 제거),
+    1=제목(자재 설명), 2=M/N, 3=S/N, 4=고객, 5=연락처, 6=주소, 7=메모.
+    """
+    import json as _json
+    from items import add_manual_note
+
+    ids = [int(i) for i in (row_ids or []) if str(i).strip()]
+    if not ids:
+        return {"restored": 0}
+    conn = _connect()
+    try:
+        ph = ",".join("?" for _ in ids)
+        rows = conn.execute(f"SELECT * FROM rows WHERE id IN ({ph}) ORDER BY sheet_id, excel_row", ids).fetchall()
+    finally:
+        conn.close()
+    created = []
+    for r in rows:
+        c = [str(x or "").strip() for x in _json.loads(r["cells_json"])] + [""] * 8
+        label = re.sub(r"^(배송|회수)\s*", "", c[0]).strip().replace("\n", " ")
+        title = c[1] or c[2] or label
+        if not title:
+            continue
+        res = add_manual_note(
+            [title, c[2], c[3], c[4], c[5], c[6], c[7]], target_date, r["kind"] or "배송", label or "memo", 7,
+        )
+        created.append(res["orderId"])
+    return {"restored": len(created), "orderIds": created}
+
+
 def stats():
     conn = _connect()
     try:

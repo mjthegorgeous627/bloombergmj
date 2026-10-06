@@ -109,18 +109,36 @@ def _order_type_for(order_num, title):
 
 
 def _lookup_delivery_obd(order_num):
-    """Read VL06O session 0 and return the Bloomberg delivery/OBD number for a ZRX delivery row."""
-    try:
-        from portal_open_delivery import find_delivery_for_order
+    """Read VL06O session 0 and return the Bloomberg delivery/OBD number for a ZRX delivery row.
 
-        _, info = find_delivery_for_order(order_num)
-        obd = str(info.get("vbeln") or "").strip()
-        if obd:
-            logger.info(f"수동 오더 {order_num}: VL06O OBD 조회 완료 {obd}")
-        return obd
-    except Exception as exc:
-        logger.warning(f"수동 오더 {order_num}: VL06O OBD 조회 실패: {exc}")
-        return ""
+    2026-10-06: 세션 0의 VL06O 목록은 20분 루프가 마지막으로 새로고침한 시점의
+    스냅샷이라, 그 뒤에 나온 오더(ZRX 67105119/67105152)는 목록에 없어 OBD가
+    빈 채로 수집됐다(로그: "VL06O에서 Pur.Doc ...을 찾지 못했습니다. 현재 일부
+    목록: 67089148"). 못 찾으면 VL06O를 새로고침(F5/재진입)한 뒤 재조회한다."""
+    from portal_open_delivery import find_delivery_for_order
+
+    last_exc = None
+    for attempt in range(3):
+        try:
+            _, info = find_delivery_for_order(order_num)
+            obd = str(info.get("vbeln") or "").strip()
+            if obd:
+                logger.info(f"수동 오더 {order_num}: VL06O OBD 조회 완료 {obd}")
+                return obd
+            last_exc = RuntimeError("VL06O 행에 Delivery# 없음")
+        except Exception as exc:
+            last_exc = exc
+        if attempt < 2:
+            try:
+                from sap_handler import get_sap_session, navigate_to_vl06o_list
+
+                logger.info(f"수동 오더 {order_num}: VL06O에 없음 → 새로고침 후 재조회 ({attempt + 1}/2)")
+                navigate_to_vl06o_list(get_sap_session(0))
+            except Exception as exc:
+                logger.warning(f"수동 오더 {order_num}: VL06O 새로고침 실패: {exc}")
+            time.sleep(2)
+    logger.warning(f"수동 오더 {order_num}: VL06O OBD 조회 실패: {last_exc}")
+    return ""
 
 
 def _open_order(session, order_num):
@@ -282,7 +300,13 @@ def run_manual_order(order_num, close_window=True):
         print(msg)
         return False
 
-    session = _open_new_sap_session()
+    # 2026-10-02: 세션 최대치 초과 등으로 여기서 예외가 나면 아래 try/finally 밖이라
+    # 락이 해제되지 않고 남아 이후 모든 재시도가 "이미 처리 중"으로 막혔다 (7853869).
+    try:
+        session = _open_new_sap_session()
+    except Exception:
+        lock.__exit__(None, None, None)
+        raise
     try:
         # 45xxxxxxxx 같은 구매오더(STO)는 VA03에 없다 → 처음부터 배송문서 경로
         if order_num.startswith("45"):

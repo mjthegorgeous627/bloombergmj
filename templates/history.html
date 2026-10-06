@@ -18,6 +18,10 @@ body{display:flex;flex-direction:column}
 .searchbar{flex:0 0 auto;background:#fff;border-bottom:1px solid var(--line);padding:12px 18px;display:flex;gap:12px;align-items:center}
 .searchbar input{flex:1;max-width:640px;font-size:15px;padding:9px 12px;border:1px solid var(--line-strong);border-radius:8px;outline:none}
 .searchbar input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+button{font-size:12.5px;padding:7px 12px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:7px;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
+button.sm{padding:5px 10px;margin-bottom:10px}
+td.ck{width:28px;padding-right:0}
 .meta{font-size:12px;color:#64748b}
 .main{flex:1;display:flex;min-height:0}
 .list{flex:1;overflow:auto;padding:0 0 24px}
@@ -49,6 +53,11 @@ mark{background:#fde68a;padding:0 1px;border-radius:2px}
 <div class="searchbar">
   <input id="q" type="search" placeholder="시리얼 / 오더번호 / 자재 / 고객명 ... (띄어쓰기로 여러 단어 AND 검색)" autofocus autocomplete="off">
   <span class="meta" id="meta"></span>
+  <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <span class="meta" id="selmeta"></span>
+    <input type="date" id="rdate" style="flex:none;font-size:12.5px;padding:5px 8px;max-width:none">
+    <button id="restore" disabled>↩ 선택 행 WORKBENCH로 되돌리기</button>
+  </span>
 </div>
 <div class="main">
   <div class="list" id="list"><div class="empty">검색어를 입력하세요. 예: 시리얼 4CE511D53G, 오더 67080595</div></div>
@@ -63,31 +72,47 @@ function hl(text,terms){let h=esc(text);terms.forEach(t=>{if(!t)return;const re=
 function terms(){return $("q").value.trim().split(/\s+/).filter(Boolean)}
 async function run(){
   const q=$("q").value.trim(), my=++seq;
-  if(!q){$("list").innerHTML='<div class="empty">검색어를 입력하세요.</div>';$("meta").textContent="";return}
+  if(!q){$("list").innerHTML='<div class="empty">검색어를 입력하세요.</div>';$("meta").textContent="";updSel();return}
   const r=await fetch("/api/history/search?q="+encodeURIComponent(q)).then(r=>r.json());
   if(my!==seq)return;
   cur=r.results||[];
   $("meta").textContent=r.total+"건"+(r.total>cur.length?" (최근 "+cur.length+"건 표시)":"");
   if(!cur.length){$("list").innerHTML='<div class="empty">결과 없음</div>';return}
-  const t=terms();
-  $("list").innerHTML='<table><tr><th>날짜</th><th>구분</th><th>오더</th><th>자재</th><th>M/N</th><th>S/N</th><th>고객</th><th>출처</th></tr>'+
+  const t=terms();updSel();
+  $("list").innerHTML='<table><tr><th class="ck"><input type="checkbox" id="ckall"></th><th>날짜</th><th>구분</th><th>오더</th><th>자재</th><th>M/N</th><th>S/N</th><th>고객</th><th>출처</th></tr>'+
    cur.map((x,i)=>{const c=x.cells;
      const first=(c[0]||"").replace(/^(배송|회수)\s*/,"");
-     return '<tr class="res" data-i="'+i+'"><td>'+esc(x.sheetDate||x.sheetName)+'</td><td class="k-'+x.kind+'">'+esc(x.kind)+'</td><td>'+hl(first,t)+
+     return '<tr class="res" data-i="'+i+'"><td class="ck"><input type="checkbox" class="ck1" data-i="'+i+'"></td><td>'+esc(x.sheetDate||x.sheetName)+'</td><td class="k-'+x.kind+'">'+esc(x.kind)+'</td><td>'+hl(first,t)+
        '</td><td>'+hl(c[1]||"",t)+'</td><td>'+hl(c[2]||"",t)+'</td><td>'+hl(c[3]||"",t)+'</td><td>'+hl(c[4]||"",t)+
        '</td><td style="color:#94a3b8">'+esc(x.sourceFile.replace(/\.xlsx$/,""))+" / "+esc(x.sheetName)+" #"+x.excelRow+'</td></tr>'}).join("")+'</table>';
 }
+function checked(){return [...document.querySelectorAll(".ck1:checked")].map(n=>cur[+n.dataset.i].rowId)}
+function updSel(){const n=checked().length;$("selmeta").textContent=n?n+"건 선택":"";$("restore").disabled=!n}
+async function restore(ids){
+  const date=$("rdate").value;
+  if(!ids.length||!confirm(ids.length+"개 행을 WORKBENCH "+(date||"오늘")+" 날짜에 메모 행으로 되돌립니다.\n(Order#는 글자로만 남고 SAP/Portal 자동화 대상은 되지 않습니다)"))return;
+  const r=await fetch("/api/history/restore",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rowIds:ids,date})}).then(r=>r.json());
+  alert(r.error?("실패: "+r.error):(r.restored+"개 행을 되돌렸습니다."));
+  document.querySelectorAll(".ck1:checked").forEach(n=>n.checked=false);updSel();
+}
+$("restore").addEventListener("click",()=>restore(checked()));
+$("list").addEventListener("change",e=>{
+  if(e.target.id==="ckall")document.querySelectorAll(".ck1").forEach(n=>n.checked=e.target.checked);
+  if(e.target.id==="ckall"||e.target.classList.contains("ck1"))updSel();
+});
 $("list").addEventListener("click",async e=>{
+  if(e.target.closest("td.ck,th.ck"))return;
   const tr=e.target.closest("tr.res"); if(!tr)return;
   document.querySelectorAll("tr.res.sel").forEach(n=>n.classList.remove("sel")); tr.classList.add("sel");
   const x=cur[+tr.dataset.i];
   const d=await fetch("/api/history/group?sheet_id="+x.sheetId+"&group_no="+x.groupNo).then(r=>r.json());
   const t=terms();
   $("detail").innerHTML='<h2>'+esc(x.sheetDate||x.sheetName)+' 배송장</h2><div class="src">'+esc(d.sourceFile)+' · 시트 "'+esc(d.sheetName)+'" · 엑셀 '+
-    d.rows.map(r=>r.excelRow).join(", ")+'행</div>'+
+    d.rows.map(r=>r.excelRow).join(", ")+'행</div><button class="sm" id="rgroup">↩ 이 묶음 전체 되돌리기</button>'+
     d.rows.map(r=>'<div class="drow"><div class="cap">'+esc(r.kind||"")+' · '+r.excelRow+'행</div>'+
       r.cells.map((v,i)=>v?'<div class="f"><b>'+esc(LABELS[i]||("열"+(i+1)))+'</b><span>'+hl(v,t)+'</span></div>':"").join("")+'</div>').join("");
   $("detail").classList.add("show");
+  $("rgroup").onclick=()=>restore(d.rows.map(r=>r.rowId));
 });
 $("q").addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(run,220)});
 fetch("/api/history/stats").then(r=>r.json()).then(s=>{$("q").placeholder+="  ["+s.rows.toLocaleString()+"행, "+(s.from||"")+" ~ "+(s.to||"")+"]"}).catch(()=>{});

@@ -448,6 +448,83 @@ def _close_tech_obj_popup(session):
         break
 
 
+PAPER_RELO = "paper_relo"
+_LAST_PAPER_RELO_TEXT = ""
+
+
+def _popup_full_text(session, popup_id):
+    """팝업(wnd[n])의 제목 + 본문 라벨 텍스트를 모아 한 문자열로 돌려준다.
+    팝업이 없으면 None."""
+    try:
+        popup = session.findById(popup_id)
+    except Exception:
+        return None
+    parts = []
+    try:
+        parts.append(popup.Text or '')
+    except Exception:
+        pass
+
+    def walk(node, depth=0):
+        if depth > 4:
+            return
+        try:
+            kids = node.Children
+            n = kids.Count
+        except Exception:
+            return
+        for k in range(n):
+            try:
+                c = kids.ElementAt(k)
+            except Exception:
+                continue
+            try:
+                t = (c.Text or '').strip()
+                if t:
+                    parts.append(t)
+            except Exception:
+                pass
+            walk(c, depth + 1)
+
+    try:
+        walk(popup.findById("usr"))
+    except Exception:
+        pass
+    return " ".join(p for p in parts if p)
+
+
+def _is_paper_relo_prompt(text):
+    t = (text or '').lower()
+    return 'relo' in t
+
+
+def _decline_popup_and_leave_order(session):
+    """paper relo 확인 팝업을 OK/Yes로 확정하지 않고 취소로 닫은 뒤, Technical
+    objects 팝업도 닫는다. 오더는 저장하지 않는다(변경 없음)."""
+    # 1) 확인 팝업 취소: F12(Cancel) 우선, 안 닫히면 No/Cancel 계열 버튼 텍스트로 탐색
+    for popup_id in ("wnd[2]", "wnd[1]"):
+        txt = _popup_full_text(session, popup_id)
+        if txt is None or not _is_paper_relo_prompt(txt):
+            continue
+        try:
+            session.findById(popup_id).sendVKey(12)
+            time.sleep(0.6)
+        except Exception:
+            pass
+        if _popup_full_text(session, popup_id) and _is_paper_relo_prompt(_popup_full_text(session, popup_id)):
+            try:
+                for btn in session.findById(popup_id + "/tbar[0]").Children:
+                    if (btn.Tooltip or btn.Text or '').strip().lower() in ('cancel', 'no', '취소', '아니오'):
+                        btn.press()
+                        time.sleep(0.6)
+                        break
+            except Exception:
+                pass
+    # 2) Technical objects 팝업이 남아있으면 닫기
+    if _popup_full_text(session, "wnd[1]") is not None:
+        _close_tech_obj_popup(session)
+
+
 def _write_sn_to_popup(session, new_sn):
     """
     'Maintain Serial Numbers' 팝업(wnd[1])의 첫 번째 빈 행에 new_sn 입력.
@@ -511,6 +588,18 @@ def _write_sn_to_popup(session, new_sn):
 
                 # 팝업(wnd[2])이 뜨면 Yes → wnd[1] 자동 닫힘
                 # 팝업 없으면 그냥 진행
+                # 단, 문구에 'paper relo'가 들어있으면 절대 OK/Yes 하지 않는다
+                # (2026-10-06 사용자 지적, ZRE 67095984): paper relo는 여기서가
+                # 아니라 ZIH08에서 별도 절차로 해야 하므로 취소하고 빠져나온 뒤
+                # 호출측에 'paper_relo' 신호만 전달한다.
+                for _pid in ("wnd[2]", "wnd[1]"):
+                    _txt = _popup_full_text(session, _pid)
+                    if _txt is not None and _is_paper_relo_prompt(_txt):
+                        logger.warning(f"paper relo 확인 팝업 감지({_pid}): {_txt} - 취소하고 중단")
+                        _decline_popup_and_leave_order(session)
+                        global _LAST_PAPER_RELO_TEXT
+                        _LAST_PAPER_RELO_TEXT = _txt
+                        return PAPER_RELO
                 try:
                     popup = session.findById("wnd[2]")
                     yes_clicked = False
@@ -633,7 +722,14 @@ def input_sn_to_return_item(session, order_num, new_sn):
         }
 
     # 6. S/N 입력
-    if not _write_sn_to_popup(session, new_sn):
+    wrote = _write_sn_to_popup(session, new_sn)
+    if wrote == PAPER_RELO:
+        return {
+            'status': 'paper_relo',
+            'existing_sns': [],
+            'message': f"paper relo 필요 - SAP 확인창 취소하고 저장 안 함 (ZIH08에서 별도 paper relo 진행 필요). 팝업: {_LAST_PAPER_RELO_TEXT}"[:400],
+        }
+    if not wrote:
         _close_tech_obj_popup(session)
         return {'status': 'error', 'existing_sns': [], 'message': 'S/N 입력 실패'}
 
