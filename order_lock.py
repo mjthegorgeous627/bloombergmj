@@ -14,7 +14,9 @@
 수집~기록 중"을 감지해 두 번째 시도를 즉시(SAP 진입도 하기 전에) 막는다.
 """
 
+import ctypes
 import os
+import re
 import time
 
 _LOCK_DIR = os.path.join(os.path.dirname(__file__), "order_locks")
@@ -25,6 +27,42 @@ STALE_SECONDS = 30 * 60  # 30분 - 정상 처리 소요시간(수 분)보다 넉
 
 def _lock_path(order_num):
     return os.path.join(_LOCK_DIR, f"{str(order_num).strip()}.lock")
+
+
+def _pid_alive(pid):
+    """Windows에서 PID가 실제로 살아있는지. 판단이 안 되면(권한 등) 살아있다고 본다."""
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    ERROR_ACCESS_DENIED = 5
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = ctypes.c_void_p
+    handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not handle:
+        # 접근 거부 = 프로세스는 있다, 그 외(잘못된 PID 등) = 없다
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    try:
+        code = ctypes.c_ulong()
+        if k32.GetExitCodeProcess(ctypes.c_void_p(handle), ctypes.byref(code)):
+            return code.value == STILL_ACTIVE
+        return True
+    finally:
+        k32.CloseHandle(ctypes.c_void_p(handle))
+
+
+def _owner_is_dead(path):
+    """락 파일의 'pid=NNN'을 읽어 그 프로세스가 이미 없으면 True.
+    읽기/파싱 실패나 자기 자신의 PID면 False(건드리지 않음)."""
+    try:
+        with open(path, "r") as f:
+            m = re.search(r"pid=(\d+)", f.read())
+        if not m:
+            return False
+        pid = int(m.group(1))
+        if pid == os.getpid():
+            return False
+        return not _pid_alive(pid)
+    except Exception:
+        return False
 
 
 def try_acquire(order_num):
@@ -38,7 +76,11 @@ def try_acquire(order_num):
     # 기존 락이 있으면 stale 여부만 확인 (내용은 참고용, 신뢰하지 않음).
     try:
         age = time.time() - os.path.getmtime(path)
-        if age < STALE_SECONDS:
+        # 2026-10-06: 락을 쥔 프로세스가 해제 전에 죽으면(PID 15316이 17:13에
+        # __excel_write__ 락을 쥔 채 죽음) 30분 동안 모든 Excel 쓰기(마감→공유파일
+        # 반영, Dashboard 갱신, 새 날짜 시트)가 90초 대기 후 타임아웃으로 실패했다.
+        # 주인 PID가 이미 없으면 시간을 안 기다리고 바로 stale로 본다.
+        if age < STALE_SECONDS and not _owner_is_dead(path):
             return False
         # stale → 탈취 시도 (아래서 다시 원자적으로 생성)
         try:

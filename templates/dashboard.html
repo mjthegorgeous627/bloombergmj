@@ -2804,23 +2804,54 @@ async function runQuickSettlement(){
   toast(month+' 퀵 금액 정리를 원본에 반영했습니다 ('+r.sheet+' 시트)');
 }
 
+// 2026-10-06 실사고(ZRX 67105149): 배송(10/6 완료)과 회수(10/7 예정, 미완료)를
+// 날짜 나눠 저장해뒀는데 shift-클릭 범위선택 등으로 회수까지 체크된 채 마감이
+// 눌려, 아직 안 한 회수가 마감 파일 10-7 시트로 나가고 보드에서도 사라졌다.
+// 그래서 (1) 완료(파랑)/취소/billed가 아닌 행은 체크돼 있어도 마감에서 강제로
+// 뺀다(체크도 해제), (2) 마감이 진행 중인 동안 재클릭을 막는다(응답이 느릴 때
+// 다시 눌러 같은 행이 두 번 내보내진 사고). 서버도 같은 검증을 한 번 더 한다
+// (items.check_finalizable).
+let FINALIZING=false;
+const FINALIZABLE_UI_STATUSES=['done','cancelled','billed'];
 async function finalizeChecked(){
+  if(FINALIZING){toast('이미 마감 처리 중입니다 - 끝날 때까지 기다리세요 (다시 누르지 마세요)');return}
   const checkedRowKeys=new Set([...document.querySelectorAll('.row-check:checked')].map(cb=>cb.dataset.rowKey));
-  const checkedRows=ROWS.filter(r=>checkedRowKeys.has(r.rowKey));
-  if(!checkedRows.length){toast('마감할 행을 먼저 체크하세요 (날짜 줄 체크박스로 한 번에 선택 후, 필요하면 개별 행 체크를 해제하세요)');return}
+  const allChecked=ROWS.filter(r=>checkedRowKeys.has(r.rowKey));
+  const notReady=allChecked.filter(r=>!FINALIZABLE_UI_STATUSES.includes(r.uiStatus));
+  if(notReady.length){
+    notReady.forEach(r=>checkedRowKeys.delete(r.rowKey));
+    document.querySelectorAll('.row-check:checked').forEach(cb=>{ if(!checkedRowKeys.has(cb.dataset.rowKey)) cb.checked=false; });
+    window.alert('아직 완료(파랑)/취소/billed가 아닌 행 '+notReady.length+'건은 마감에서 제외했습니다 (보드에 그대로 남음):\n\n'
+      +notReady.map(r=>'- '+r.date+' '+(r.orderLabel||'(메모)')+' '+(r.itemType||'')).join('\n'));
+  }
+  const checkedRows=allChecked.filter(r=>checkedRowKeys.has(r.rowKey));
+  if(!checkedRows.length){toast('마감할 행을 먼저 체크하세요 (완료(파랑)/취소/billed 행만 마감할 수 있습니다)');return}
   const isos=[...new Set(checkedRows.map(r=>r.date))];
   const payload={};
   isos.forEach(iso=>{payload[iso]=buildExportRows(iso, checkedRowKeys)});
+  FINALIZING=true;
+  const finBtn=document.querySelector('button.finish');
+  if(finBtn) finBtn.disabled=true;
+  try{
+    await finalizeCheckedRun(checkedRows, checkedRowKeys, isos, payload);
+  } finally {
+    FINALIZING=false;
+    if(finBtn) finBtn.disabled=false;
+  }
+}
+
+async function finalizeCheckedRun(checkedRows, checkedRowKeys, isos, payload){
   toast('마감 처리 중 (엑셀로 내보내는 중)...');
   let exportData;
   try{
     const res=await fetch('/api/export', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({dates:payload})
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dates:payload, itemIds:checkedRows.map(r=>r.itemId)})
     });
     exportData=await res.json();
     if(!res.ok || exportData.error){throw new Error(exportData.error||'내보내기 실패')}
   }catch(err){
-    toast('마감 실패 (엑셀로 내보내지 못해 workbench.db는 그대로 둠): '+err.message);
+    window.alert('마감 실패 (엑셀로 내보내지 못해 workbench.db는 그대로 둠)\n\n'+err.message);
     return;
   }
   const itemIds=checkedRows.map(r=>r.itemId);

@@ -76,6 +76,9 @@ NOTES_PAGE_TEMPLATE = (TEMPLATES_DIR / "notes.html").read_text(encoding="utf-8")
 PAGE_TEMPLATE = (TEMPLATES_DIR / "dashboard.html").read_text(encoding="utf-8")
 
 
+_FINALIZE_LOCK = threading.Lock()
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         with WORKBENCH_ACCESS_LOG.open("a", encoding="utf-8") as fh:
@@ -210,7 +213,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/export":
                 body = self.read_json()
-                self.send_json(export_dates_to_excel(body.get("dates") or {}))
+                # 마감은 동시에 하나만 (2026-10-06): 응답이 느릴 때(락 대기 등) 버튼을
+                # 또 누르면 같은 행이 마감 파일에 두 번 쓰이고 DB 삭제도 두 번 나갔다.
+                if not _FINALIZE_LOCK.acquire(blocking=False):
+                    raise ValueError("이미 마감 처리 중입니다 - 끝날 때까지 기다리세요 (다시 누르지 마세요)")
+                try:
+                    check_finalizable(body.get("itemIds") or [])
+                    self.send_json(export_dates_to_excel(body.get("dates") or {}))
+                finally:
+                    _FINALIZE_LOCK.release()
                 return
             if parsed.path == "/api/monthly/quick_settlement":
                 body = self.read_json()

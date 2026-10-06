@@ -112,6 +112,53 @@ def delete_items(item_ids):
     return {"deleted": len(item_ids)}
 
 
+# 마감 대상이 될 수 있는 board_status. 대기('')/pending(회수 예정 등)은 아직
+# 확정 전이라 마감 파일에 들어가면 안 된다.
+FINALIZABLE_BOARD_STATUSES = ("done", "cancelled", "billed")
+
+
+def check_finalizable(item_ids):
+    """마감(내보내기+삭제) 직전 서버측 검증 (2026-10-06 실사고).
+
+    ZRX 67105149처럼 같은 오더의 배송(10/6 완료)과 회수(10/7 예정, 미완료)를
+    날짜 나눠 저장해뒀는데, 화면에서 둘 다 체크된 채 마감이 눌려 회수까지
+    마감 파일 10-7 시트로 내보내지고 보드에서 삭제돼버렸다. 화면(JS) 검증만으론
+    체크 경로(shift-클릭 범위 선택 등)가 늘 새로 뚫리므로, DB에 저장된 실제
+    상태로 한 번 더 막는다. 같은 이유로 이미 삭제된(=이미 마감된) 항목이
+    다시 들어오는 중복 마감(응답 지연 중 버튼 재클릭, 오래된 화면)도 여기서 막힌다.
+
+    문제 항목이 하나라도 있으면 ValueError(메시지에 항목 목록) - 아무것도
+    내보내거나 지우지 않는다."""
+    item_ids = [int(i) for i in item_ids if str(i).strip()]
+    if not item_ids:
+        return
+    with connect() as con:
+        placeholders = ",".join("?" for _ in item_ids)
+        rows = con.execute(
+            f"""
+            SELECT i.id, i.item_type, i.item_date, i.board_status, i.deleted_at, o.order_no, o.source_date
+            FROM order_items i JOIN orders o ON o.id = i.order_id
+            WHERE i.id IN ({placeholders})
+            """,
+            item_ids,
+        ).fetchall()
+    found = {r["id"] for r in rows}
+    problems = []
+    for r in rows:
+        label = f"{r['order_no'] or '(메모)'} {r['item_type'] or ''} {r['item_date'] or r['source_date'] or ''}".strip()
+        if r["deleted_at"]:
+            problems.append(f"{label}: 이미 마감/삭제된 항목")
+        elif (r["board_status"] or "") not in FINALIZABLE_BOARD_STATUSES:
+            problems.append(f"{label}: 완료(파랑)/취소/billed 상태가 아님")
+    for missing in sorted(set(item_ids) - found):
+        problems.append(f"item {missing}: DB에 없음(오래된 화면?)")
+    if problems:
+        raise ValueError(
+            "마감 중단 - 아무것도 내보내거나 삭제하지 않았습니다.\n" + "\n".join(problems)
+            + "\n(화면을 새로고침한 뒤, 완료된 행만 체크해서 다시 마감하세요)"
+        )
+
+
 def list_deleted_items():
     """The actual browsable "trash" the DELETED_ITEM_RETENTION_DAYS window
     promises - Ctrl+Z only reaches the last UNDO_HISTORY_LIMIT actions, so a
