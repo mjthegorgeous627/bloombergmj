@@ -2817,11 +2817,15 @@ async function finalizeChecked(){
   if(FINALIZING){toast('이미 마감 처리 중입니다 - 끝날 때까지 기다리세요 (다시 누르지 마세요)');return}
   const checkedRowKeys=new Set([...document.querySelectorAll('.row-check:checked')].map(cb=>cb.dataset.rowKey));
   const allChecked=ROWS.filter(r=>checkedRowKeys.has(r.rowKey));
-  const notReady=allChecked.filter(r=>!FINALIZABLE_UI_STATUSES.includes(r.uiStatus));
+  // 2026-10-06 ZRX 67103429: 파랑(done)인데 날짜가 아직 안 온(예: 10/8) 회수가 10/2에 마감돼
+  // 사라졌다. 오늘 뒤 날짜의 done은 마감 대상이 아니다(취소/billed는 예외, 서버도 동일 검증).
+  const todayIso=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const notReady=allChecked.filter(r=>!FINALIZABLE_UI_STATUSES.includes(r.uiStatus)
+    || (r.uiStatus==='done' && r.date>todayIso));
   if(notReady.length){
     notReady.forEach(r=>checkedRowKeys.delete(r.rowKey));
     document.querySelectorAll('.row-check:checked').forEach(cb=>{ if(!checkedRowKeys.has(cb.dataset.rowKey)) cb.checked=false; });
-    window.alert('아직 완료(파랑)/취소/billed가 아닌 행 '+notReady.length+'건은 마감에서 제외했습니다 (보드에 그대로 남음):\n\n'
+    window.alert('마감할 수 없는 행 '+notReady.length+'건은 제외했습니다 (보드에 그대로 남음) - 완료(파랑)/취소/billed가 아니거나, 아직 오지 않은 날짜의 완료 행입니다:\n\n'
       +notReady.map(r=>'- '+r.date+' '+(r.orderLabel||'(메모)')+' '+(r.itemType||'')).join('\n'));
   }
   const checkedRows=allChecked.filter(r=>checkedRowKeys.has(r.rowKey));

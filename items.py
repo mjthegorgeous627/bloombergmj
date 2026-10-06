@@ -143,6 +143,7 @@ def check_finalizable(item_ids):
             item_ids,
         ).fetchall()
     found = {r["id"] for r in rows}
+    today_iso = date.today().isoformat()
     problems = []
     for r in rows:
         label = f"{r['order_no'] or '(메모)'} {r['item_type'] or ''} {r['item_date'] or r['source_date'] or ''}".strip()
@@ -150,6 +151,11 @@ def check_finalizable(item_ids):
             problems.append(f"{label}: 이미 마감/삭제된 항목")
         elif (r["board_status"] or "") not in FINALIZABLE_BOARD_STATUSES:
             problems.append(f"{label}: 완료(파랑)/취소/billed 상태가 아님")
+        elif r["board_status"] == "done" and (r["item_date"] or r["source_date"] or "") > today_iso:
+            # 2026-10-06: ZRX 67103429 회수(10/8 예정)가 파랑으로 찍힌 채 10/2에 마감돼
+            # 보드에서 사라졌다. 오늘보다 뒤 날짜 행이 "완료"일 수는 없다 - 정말 오늘
+            # 처리했다면 날짜를 오늘로 옮긴 뒤 마감해야 한다. (취소/billed는 예외)
+            problems.append(f"{label}: 아직 오지 않은 날짜인데 완료(파랑)로 표시됨 (오늘 처리했다면 날짜를 오늘로 옮긴 뒤 마감)")
     for missing in sorted(set(item_ids) - found):
         problems.append(f"item {missing}: DB에 없음(오래된 화면?)")
     if problems:
