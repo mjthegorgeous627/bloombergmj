@@ -832,7 +832,12 @@ def board_row(order, item, idx, total, highlights_by_item=None):
         ln for ln in (order.get("extra_codes") or "").splitlines() if ln.strip()
     ]
     return {
-        "rowKey": f"{order['id']}-{idx}",
+        # 2026-10-07 근본원인(ZRX 67105999 외 마감 사고들): 예전엔 "{오더id}-{날짜 안 순번}"이라
+        # 같은 오더의 배송(오늘)·회수(10/13)가 둘 다 "400-0"으로 겹쳤다. 화면의 체크/드래그/
+        # 마감/상태 변경은 전부 rowKey로 행을 찾으므로, 한쪽을 체크·드래그하면 다른 날짜의
+        # 같은 오더 행까지 같이 잡혀 날짜가 바뀌거나 마감에 딸려 나갔다. 항목 id는 날짜와
+        # 무관하게 유일하다. 이 값의 형식을 파싱하는 곳은 없다(서버/화면 모두 확인).
+        "rowKey": f"{order['id']}-{item['id']}",
         "orderId": order["id"],
         "itemId": item["id"],
         "orderLabel": order_label,

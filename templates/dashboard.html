@@ -1663,8 +1663,13 @@ function buildGroupRows(group, allSpans, gi){
       const checkedKeys=[...document.querySelectorAll('.row-check:checked')].map(cb=>cb.dataset.rowKey);
       const seedKeys = (checkedKeys.length && checkedKeys.includes(row.rowKey)) ? checkedKeys : [row.rowKey];
       const seedSet=new Set(seedKeys);
-      const groupKeysInvolved=new Set(ROWS.filter(r=>seedSet.has(r.rowKey)).map(r=>mergeKey(r)));
-      const fullKeys=ROWS.filter(r=>groupKeysInvolved.has(mergeKey(r))).map(r=>r.rowKey);
+      // 2026-10-07 실사고(ZRX 67105999): 같은 오더의 배송(오늘)과 회수(10/13 예정)를 날짜 나눠
+      // 놨는데, 배송 행을 드래그(같은 날짜 안 순서 변경이어도)하면 오더번호만 같다는 이유로
+      // 10/13의 회수까지 같이 끌려와 오늘로 날짜가 바뀌어 버렸다. 묶음은 "같은 날짜 안의
+      // 같은 오더"로 한정한다 - 화면에서 한 덩어리로 보이는 행들(date-group 내부)과 동일.
+      const groupId=r=>r.date+'|'+mergeKey(r);
+      const groupKeysInvolved=new Set(ROWS.filter(r=>seedSet.has(r.rowKey)).map(groupId));
+      const fullKeys=ROWS.filter(r=>groupKeysInvolved.has(groupId(r))).map(r=>r.rowKey);
       e.dataTransfer.setData('text/plain', fullKeys.join(','));
       const fullKeySet=new Set(fullKeys);
       document.querySelectorAll('.item-row').forEach(el=>{
