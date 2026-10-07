@@ -72,15 +72,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# board_sync는 자기 import 시점에 logging.basicConfig()를 한 번 호출한다
-# (board_sync.log 전용) - basicConfig()는 root logger에 handler가 이미 있으면
-# 조용히 무시되므로, 위 main.py 자신의 basicConfig()보다 먼저 import되면
-# automation.log가 board_sync.log로 뒤바뀐다(2026-08-28 board_sync.py
-# 자체 문서화된 알려진 함정). 그래서 반드시 이 지점(로깅 설정 이후)에서
-# import한다 - workbench_app.py가 함수 안에서 늦게 import하는 것과 같은 이유.
-import board_sync
-
-
 def _push_to_workbench(rows, order_id):
     """Push a just-collected order's rows straight into workbench.db - the
     same structured data write_orders_to_excel() just wrote to Excel, sent
@@ -143,10 +134,9 @@ def _write_and_notify(rows, order_id, processed):
     # 쓰던 걸 중단 - workbench가 이미 메인이라 그 파일에 "아직 확정 안 된"
     # 진행중 상태까지 섞이면 지저분해진다는 지적. 공유파일은 이제 마감
     # (확정) 데이터만 받는 1년치 아카이브 역할로 전환(workbench_app.py의
-    # export_dates_to_excel 참고), 실시간 상태는 board_sync.py가 20분 자동
-    # 루프로 REALTIME_SYNC_PATH에 채운다(main.py run_loop() 참고) - 그
-    # 파일이 이제 "실시간 반영"의 실제 대상이라 excel_portal_lookup.py도
-    # 거기를 보도록 같이 옮겼다. result=None 유지 - 아래 write_kakao_sent는
+    # export_dates_to_excel 참고). 실시간 상태는 workbench.db가 원본이다(2026-10-07에
+    # 실시간 동기화 엑셀은 폐지, excel_portal_lookup.py도 DB를 읽는다).
+    # result=None 유지 - 아래 write_kakao_sent는
     # 쓸 Excel 셀이 없으므로 자연히 스킵된다(기존 None 처리 그대로 재사용).
     result = None
 
@@ -590,18 +580,9 @@ def run_loop():
             # 넘어가는 게 최후의 방어선.
             logger.error("run_once() 미처리 예외 - 이번 사이클 실패, 다음 사이클로 계속", exc_info=True)
 
-        # 2026-09-01 사용자 결정: REALTIME_SYNC_PATH(board_sync.py의 "동기화"
-        # 대상)를 SAP 자동수집과 같은 20분 주기로 항상 최신 유지 - 워크벤치
-        # 버튼을 눌러야만 갱신되던 걸 여기서도 자동으로 하게 해서, 그 파일을
-        # 보는 excel_portal_lookup.py(POD remarks) 등이 항상 최신 상태를
-        # 본다. create_new_day_sheet()는 오늘 시트가 이미 있으면 그대로
-        # sync()만 하므로 매 사이클 호출해도 안전(--new-day와 동일 동작).
-        # run_once()와 별개의 try/except로 격리 - 이게 실패해도 SAP
-        # 자동수집 자체는 계속돼야 한다.
-        try:
-            board_sync.create_new_day_sheet()
-        except Exception:
-            logger.error("board_sync 자동 동기화 실패 - 무시하고 계속", exc_info=True)
+        # 2026-10-07 사용자 결정: 실시간 동기화 엑셀(20분마다 board_sync로 쓰던 파일)
+        # 폐지 - 원본은 workbench.db 하나이고, 그 파일은 Excel 쓰기 락만 잡아 다른
+        # 작업(마감 반영, Dashboard)을 기다리게 했다. POD/Portal 조회는 DB를 읽는다.
 
         logger.info(f"{REFRESH_INTERVAL_MINUTES}분 후 다음 실행... (수동: now.py / now.py 0~3)")
 

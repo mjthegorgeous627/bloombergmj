@@ -1,108 +1,27 @@
-"""Read portal automation defaults from the live delivery Excel workbook."""
+"""Portal 자동화(launcher.py, portal_ship_and_print.py, portal_update_pod.py)가
+오더번호로 항목/고객/OBD 기본값을 찾는 조회 모듈.
 
-import os
+2026-10-07: 예전엔 "실시간 동기화" 엑셀(REALTIME_SYNC_PATH)의 오늘 시트를 읽었지만
+그 파일을 폐지하고 workbench.db를 직접 읽는다 (원본이 DB 하나가 되도록). 함수 이름
+(find_excel_order)과 반환 구조(rows[].order_text/obd/description/qty/material/serial/
+customer/...)는 호출부를 안 건드리려고 그대로 뒀다. workbench 화면에서 시작하는
+Portal/POD는 원래 항목을 직접 넘겨서(--items-json / items_override) 이 조회를 안 타고,
+launcher.py와 CLI 대체 경로만 여기로 온다.
+"""
+
 import re
 from collections import Counter
-from datetime import datetime
 
-import openpyxl
-import xlwings as xw
-
-# 2026-09-01: 공유파일(EXCEL_PATH)은 이제 매일 SAP 수집이 직접 안 쓰고(사용자
-# 결정 - workbench가 메인, 공유파일은 마감된 확정 데이터만 담는 아카이브),
-# "지금 살아있는" 상태를 담는 파일은 board_sync.py가 20분마다 자동 채우는
-# REALTIME_SYNC_PATH로 바뀌었다. 이 모듈은 POD remarks 기본값을 실시간 최신
-# 상태에서 뽑아와야 하므로 그쪽을 본다 - 아래 코드는 전부 EXCEL_PATH라는
-# 이름 그대로 두고 값만 바꿔서, 나머지 로직(시트 탐색 등)은 안 건드렸다.
-from config import REALTIME_SYNC_PATH as EXCEL_PATH
-
+from db import connect
+from order_domain import resolve_item_type
 
 ORDER_RE = re.compile(r"\b(\d{7,})\b")
 OBD_RE = re.compile(r"\bOBD\s*[:#-]?\s*(\d{7,})\b", re.IGNORECASE)
 QTY_RE = re.compile(r"\bQty\s*[:#-]?\s*(\d+)\b|\bx\s*(\d+)\b", re.IGNORECASE)
 
 
-def _merged_map(ws):
-    mapping = {}
-    if not hasattr(ws, "merged_cells"):
-        return mapping
-    for merged in ws.merged_cells.ranges:
-        value = ws.cell(merged.min_row, merged.min_col).value
-        for row in range(merged.min_row, merged.max_row + 1):
-            for col in range(merged.min_col, merged.max_col + 1):
-                mapping[(row, col)] = value
-    return mapping
-
-
-def _cell_value(ws, row, col, merged=None):
-    if merged and (row, col) in merged:
-        return merged[(row, col)]
-    return ws.cell(row, col).value
-
-
 def _norm_digits(value):
     return "".join(ch for ch in str(value or "") if ch.isdigit())
-
-
-def _today_sheet_names(sheetnames):
-    today = datetime.today()
-    names = []
-    candidates = [f"{today.month}-{today.day}", f"{today.month}.{today.day}", f"{today.month}_{today.day}"]
-    for name in candidates:
-        if name in sheetnames and name not in names:
-            names.append(name)
-    return names
-
-
-def _recent_sheet_names(wb, days=45):
-    return _today_sheet_names(wb.sheetnames)
-
-
-def _recent_sheet_names_from_list(sheetnames, days=45):
-    return _today_sheet_names(sheetnames)
-
-
-def _row_order_text(ws, row, merged=None):
-    return str(_cell_value(ws, row, 1, merged) or "")
-
-
-def _is_order_row(ws, row, merged=None):
-    return bool(ORDER_RE.search(_row_order_text(ws, row, merged)))
-
-
-def _find_order_row(ws, order_num, merged=None):
-    target = _norm_digits(order_num).lstrip("0")
-    for row in range(1, ws.max_row + 1):
-        text = _row_order_text(ws, row, merged)
-        for found in ORDER_RE.findall(text):
-            if found.lstrip("0") == target:
-                return row
-    return None
-
-
-def _group_rows(ws, first_row, order_num, merged=None):
-    max_row = ws.max_row
-    rows = [first_row]
-    target = _norm_digits(order_num).lstrip("0")
-
-    row = first_row + 1
-    while row <= max_row:
-        text = _row_order_text(ws, row, merged).strip()
-        if text and _is_order_row(ws, row, merged):
-            if target in _norm_digits(text).lstrip("0"):
-                rows.append(row)
-                row += 1
-                continue
-            break
-        if text:
-            break
-        # Empty A cell often means continuation row for the same merged customer/address.
-        if any(_cell_value(ws, row, c, merged) for c in range(2, 5)):
-            rows.append(row)
-            row += 1
-            continue
-        break
-    return rows
 
 
 def _item_label(description):
@@ -115,8 +34,6 @@ def _item_label(description):
         return "PC"
     if "KEYBOARD" in text or "KB" in text:
         return "KB"
-    if "AUTHENTICATION" in text:
-        return "BUNIT"
     return "Item"
 
 
@@ -129,11 +46,6 @@ def _extract_qty(description):
         return max(1, int(value))
     except ValueError:
         return 1
-
-
-def _format_items(labels):
-    counts = Counter(labels)
-    return ", ".join(f"{count}x{label}" for label, count in counts.items())
 
 
 def _format_item_counts(pairs):
@@ -151,8 +63,6 @@ def _line_kind(order_text):
     text = str(order_text or "").upper()
     if "회수" in text:
         return "pickup"
-    if "배송" in text:
-        return "delivery"
     return "delivery"
 
 
@@ -182,24 +92,6 @@ def _filter_rows_by_delivery(rows, delivery):
     return selected
 
 
-def _build_result(sheet_name, order_num, rows, pickup_mode=None, source=None):
-    customer = next((r["customer"] for r in rows if r["customer"]), "")
-    obd = next((r["obd"] for r in rows if r["obd"]), "")
-    result = {
-        "sheet": sheet_name,
-        "start_row": rows[0]["row"],
-        "end_row": rows[-1]["row"],
-        "order": str(order_num),
-        "obd": obd,
-        "customer": customer,
-        "remarks": build_default_remarks(rows, customer, pickup_mode=pickup_mode),
-        "rows": rows,
-    }
-    if source:
-        result["source"] = source
-    return result
-
-
 def build_default_remarks(rows, signed_by, pickup_mode=None):
     deliveries = []
     pickups = []
@@ -226,162 +118,77 @@ def build_default_remarks(rows, signed_by, pickup_mode=None):
     return f"Delivered {delivered} to {signed_by}."
 
 
-def _open_live_workbook():
-    """이미 열려있는 인스턴스를 전체 경로 기준으로, 떠 있는 모든 Excel
-    인스턴스(xw.apps)를 통틀어 찾는다. 예전엔 파일명만("book.name") +
-    기본 Excel 인스턴스의 책 목록(xw.books)만 봤는데, 이건
-    excel_handler.get_workbook()이 2026-09-01에 고친 것과 같은 종류의
-    버그다 - 다른 폴더의 동명 파일이나, board_sync.py가 화면에 안 보이게
-    별도로 띄워둔 인스턴스에 열려있는 진짜 파일을 못 찾고 조용히 None을
-    반환해(호출부는 디스크에서 다시 읽는 것으로 대체) 저장 안 된 최신
-    편집 내용을 놓칠 수 있었다."""
-    target = os.path.normcase(os.path.abspath(str(EXCEL_PATH)))
-    try:
-        for app in xw.apps:
-            for book in app.books:
-                if os.path.normcase(os.path.abspath(book.fullname)) == target:
-                    return book
-    except Exception:
-        return None
-    return None
+def _build_result(order_num, rows, pickup_mode=None):
+    customer = next((r["customer"] for r in rows if r["customer"]), "")
+    obd = next((r["obd"] for r in rows if r["obd"]), "")
+    return {
+        "sheet": "(workbench)",
+        "start_row": rows[0]["row"],
+        "end_row": rows[-1]["row"],
+        "order": str(order_num),
+        "obd": obd,
+        "customer": customer,
+        "remarks": build_default_remarks(rows, customer, pickup_mode=pickup_mode),
+        "rows": rows,
+        "source": "workbench.db",
+    }
 
 
-def _row_value(values, row_idx, col_idx):
-    try:
-        return values[row_idx][col_idx]
-    except Exception:
-        return None
-
-
-def _find_excel_order_live(order_num, pickup_mode=None, delivery=None):
-    """Read from the currently open Excel workbook, including unsaved edits."""
-    wb = _open_live_workbook()
-    if wb is None:
-        return None
-
+def _rows_from_db(order_num):
+    """workbench.db에서 이 오더번호의 항목들을 옛 엑셀 행 구조로 돌려준다.
+    같은 오더번호가 여러 orders 행(배송/회수가 따로 수집된 경우 등)으로 있으면 전부
+    이어 붙인다. 살아있는 항목이 하나도 없으면(이미 마감돼 소프트삭제된 뒤) 삭제된
+    항목이라도 보여줘서 마감 직후 POD 처리도 막히지 않게 한다."""
     target = _norm_digits(order_num).lstrip("0")
-    sheet_names = [sheet.name for sheet in wb.sheets]
-    for sheet_name in _recent_sheet_names_from_list(sheet_names):
-        ws = wb.sheets[sheet_name]
-        used = ws.used_range
-        values = used.value
-        if values is None:
-            continue
-        if not isinstance(values, list):
-            continue
-        if values and not isinstance(values[0], list):
-            values = [values]
-
-        first_idx = None
-        for idx, row in enumerate(values):
-            a_value = _row_value(values, idx, 0)
-            if a_value and target in _norm_digits(a_value).lstrip("0"):
-                first_idx = idx
+    if not target:
+        return []
+    rows = []
+    with connect() as con:
+        orders = [o for o in con.execute("SELECT * FROM orders ORDER BY id").fetchall()
+                  if _norm_digits(o["order_no"]).lstrip("0") == target]
+        for include_deleted in (False, True):
+            for order in orders:
+                od = dict(order)
+                sql = "SELECT * FROM order_items WHERE order_id=?"
+                if not include_deleted:
+                    sql += " AND deleted_at IS NULL"
+                items = [dict(i) for i in con.execute(sql + " ORDER BY line_no", (order["id"],)).fetchall()]
+                for idx, item in enumerate(items):
+                    kind = resolve_item_type(od, item, idx, len(items)) or "배송"
+                    delivery_no = str(od.get("delivery_no") or "").strip()
+                    code_lines = ([f"OBD {delivery_no}"] if delivery_no else []) + [
+                        ln for ln in str(od.get("extra_codes") or "").splitlines() if ln.strip()
+                    ]
+                    order_text = "\n".join([f"{kind} {od.get('order_type') or ''} {od.get('order_no') or ''}".strip()] + code_lines)
+                    description = str(item.get("description") or "")
+                    try:
+                        qty = max(1, int(float(item.get("qty"))))
+                    except (TypeError, ValueError):
+                        qty = _extract_qty(description)
+                    rows.append({
+                        "row": len(rows) + 1,
+                        "order_text": order_text,
+                        "obd": delivery_no,
+                        "description": description,
+                        "qty": qty,
+                        "material": str(item.get("material") or "").strip(),
+                        "serial": str(item.get("serial") or "").strip(),
+                        "customer": str(od.get("customer") or "").strip(),
+                        "phone": str(od.get("phone") or "").strip(),
+                        "address": str(od.get("address") or "").strip(),
+                        "memo": str(od.get("memo") or "").strip(),
+                    })
+            if rows:
                 break
-        if first_idx is None:
-            continue
-
-        group = [first_idx]
-        idx = first_idx + 1
-        while idx < len(values):
-            a_text = str(_row_value(values, idx, 0) or "").strip()
-            if a_text and ORDER_RE.search(a_text):
-                if target in _norm_digits(a_text).lstrip("0"):
-                    group.append(idx)
-                    idx += 1
-                    continue
-                break
-            if a_text:
-                break
-            if any(_row_value(values, idx, c) for c in range(1, 4)):
-                group.append(idx)
-                idx += 1
-                continue
-            break
-
-        rows = []
-        for idx in group:
-            order_text = _row_value(values, idx, 0) or ""
-            description = _row_value(values, idx, 1) or ""
-            rows.append(
-                {
-                    "row": used.row + idx,
-                    "order_text": order_text,
-                    "obd": _extract_obd(order_text),
-                    "description": description,
-                    "qty": _extract_qty(description),
-                    "material": str(_row_value(values, idx, 2) or "").strip(),
-                    "serial": str(_row_value(values, idx, 3) or "").strip(),
-                    "customer": str(_row_value(values, idx, 4) or "").strip(),
-                    "phone": str(_row_value(values, idx, 5) or "").strip(),
-                    "address": str(_row_value(values, idx, 6) or "").strip(),
-                    "memo": str(_row_value(values, idx, 7) or "").strip(),
-                }
-            )
-
-        rows = _filter_rows_by_delivery(rows, delivery)
-        if not rows:
-            continue
-        return _build_result(ws.name, order_num, rows, pickup_mode=pickup_mode, source="live_excel")
-    return None
+    return rows
 
 
 def find_excel_order(order_num, pickup_mode=None, delivery=None, use_live=False):
-    """Return Excel-derived portal defaults for an order number."""
-    if use_live:
-        try:
-            live = _find_excel_order_live(order_num, pickup_mode=pickup_mode, delivery=delivery)
-        except Exception:
-            live = None
-        if live:
-            return live
-
-    wb = openpyxl.load_workbook(EXCEL_PATH, read_only=True, data_only=True)
-    try:
-        for sheet_name in _recent_sheet_names(wb):
-            ws = wb[sheet_name]
-            # Quick scan A column first; build merged map only if this sheet may match.
-            target = _norm_digits(order_num).lstrip("0")
-            possible = False
-            for row in range(1, ws.max_row + 1):
-                value = ws.cell(row, 1).value
-                if value and target in _norm_digits(value).lstrip("0"):
-                    possible = True
-                    break
-            if not possible:
-                continue
-            merged = _merged_map(ws)
-            first_row = _find_order_row(ws, order_num, merged)
-            if not first_row:
-                continue
-            group = _group_rows(ws, first_row, order_num, merged)
-            rows = []
-            for row in group:
-                order_text = _cell_value(ws, row, 1, merged) or ""
-                description = _cell_value(ws, row, 2, merged) or ""
-                rows.append(
-                    {
-                        "row": row,
-                        "order_text": order_text,
-                        "obd": _extract_obd(order_text),
-                        "description": description,
-                        "qty": _extract_qty(description),
-                        "material": str(_cell_value(ws, row, 3, merged) or "").strip(),
-                        "serial": str(_cell_value(ws, row, 4, merged) or "").strip(),
-                        "customer": str(_cell_value(ws, row, 5, merged) or "").strip(),
-                        "phone": str(_cell_value(ws, row, 6, merged) or "").strip(),
-                        "address": str(_cell_value(ws, row, 7, merged) or "").strip(),
-                        "memo": str(_cell_value(ws, row, 8, merged) or "").strip(),
-                    }
-                )
-
-            rows = _filter_rows_by_delivery(rows, delivery)
-            if not rows:
-                continue
-            return _build_result(ws.title, order_num, rows, pickup_mode=pickup_mode)
-    finally:
-        wb.close()
-    raise LookupError(f"Excel 배송장에서 오더 {order_num}을 찾지 못했습니다.")
+    """오더번호로 Portal 기본값을 찾는다. (use_live는 호출부 호환용 - 이제 항상 DB)"""
+    rows = _filter_rows_by_delivery(_rows_from_db(order_num), delivery)
+    if not rows:
+        raise LookupError(f"workbench에서 오더 {order_num}을 찾지 못했습니다.")
+    return _build_result(order_num, rows, pickup_mode=pickup_mode)
 
 
 if __name__ == "__main__":

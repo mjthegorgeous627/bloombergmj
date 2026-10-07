@@ -227,9 +227,6 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.read_json()
                 self.send_json(run_quick_settlement(body.get("month") or "", body.get("mode") or "draft"))
                 return
-            if parsed.path == "/api/sync_delivery_excel":
-                self.send_json(sync_delivery_excel())
-                return
             if parsed.path == "/api/items/delete":
                 body = self.read_json()
                 self.send_json(delete_items(body.get("itemIds") or []))

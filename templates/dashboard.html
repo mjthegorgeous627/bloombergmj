@@ -356,7 +356,6 @@ tbody.date-group.collapsed .item-row,tbody.date-group.collapsed .empty-row{displ
       </div>
       <button class="btn block finish" onclick="finalizeChecked()" title="날짜 줄의 체크박스를 누르면 그 날짜의 행이 전부 기본 체크됨 - 아직 해결 안 된 행은 체크만 해제하면 이번 마감에서 빠지고 보드에 그대로 남음(며칠 뒤 그 행만 체크해서 마감하면 원래 날짜의 시트 맨 아래에 이어붙음). 엑셀 저장이 성공해야만 workbench.db에서도 삭제됨">마감 (내보내기 + 삭제)</button>
       <button class="btn block" onclick="printChecked()" title="날짜 줄의 체크박스(날짜 전체) 또는 행 체크박스(오더 단위, 한쪽 leg만 체크해도 같은 오더 전체가 인쇄됨)로 선택 - A4 가로, 흑백">배송장 인쇄</button>
-      <button class="btn block" onclick="syncDeliveryExcel()" title="workbench에 있는데 아직 기존 배송장 엑셀(2026 배송장.xlsx)에 없는 오더만 골라 오늘 시트의 해당 날짜 섹션에 채워 넣음 - 이미 있는 건 건드리지 않으니 여러 번 눌러도 안전. workbench가 완전히 메인이 될 때까지 기존 배송장 엑셀도 손으로 안 맞추기 위한 임시 버튼(2026-08-28)">기존 배송장 엑셀로 동기화</button>
       <div class="ctrl-divider"></div>
       <div class="ctrl-inline" title="평상시엔 필요 없음 - SAP 수집이 workbench.db에 직접 반영되므로 자동 동기화는 더 이상 엑셀을 다시 읽지 않음. 엑셀에 직접 입력/수정한 내용을 워크벤치로 가져와야 할 때만 시트명과 행 범위를 지정해 1회성으로 사용">
         <input type="text" id="excelRangeSheet" placeholder="시트명 (예: 8-6)" size="10">
@@ -2758,27 +2757,6 @@ function printChecked(){
 // alone - export_dates_to_excel() targets that row's own `date` field, so it
 // lands appended to the bottom of the SAME sheet the rest of that date
 // already went to, not a new sheet. --
-// -- "기존 배송장 엑셀로 동기화": workbench.db에 있는데 아직 기존 배송장
-// 엑셀(EXCEL_PATH)에는 없는 오더를 그 오더의 날짜 섹션에 채워 넣는다
-// (board_sync.py 참고). 마감과 달리 workbench.db는 전혀 건드리지 않고 -
-// 그냥 기존 배송장 엑셀 쪽에 누락분을 채워 넣기만 하는 편도 동기화.
-// 2026-08-28: workbench가 완전히 메인이 될 때까지, 기존 배송장 엑셀도
-// 손으로 안 맞추기 위한 임시 버튼.
-async function syncDeliveryExcel(){
-  toast('배송장 엑셀에 동기화 중...');
-  let result;
-  try{
-    const res=await fetch('/api/sync_delivery_excel', {method:'POST'});
-    result=await res.json();
-    if(!res.ok || result.error){throw new Error(result.error||'동기화 실패')}
-  }catch(err){
-    toast('동기화 실패: '+err.message);
-    return;
-  }
-  toast(result.added>0 ? `배송장 ${result.sheet}시트에 ${result.added}건 반영 완료` : '이미 최신 상태 (추가할 오더 없음)');
-}
-
-
 // -- 월초 작업 1) 퀵 금액 정리 (2026-10-01): quick_settlement 저장소의 스크립트를
 // draft(사본 미리보기) -> 확인 -> apply(원본 반영) 순서로 호출한다.
 async function runQuickSettlement(){

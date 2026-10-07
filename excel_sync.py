@@ -794,8 +794,8 @@ def _mirror_finalize_to_shared_excel(dates_payload):
     써서 지저분해졌었다. 그 자동쓰기는 이제 껐고(main.py/manual_order_
     handler.py), 대신 workbench에서 실제로 "완료"로 확정 처리된 마감 데이터만
     이 함수로 공유파일에 반영한다 - 공유파일이 "1년치 확정 기록 아카이브"
-    역할을 하게 됨. 실시간 상태는 board_sync.py가 20분마다 자동으로 채우는
-    REALTIME_SYNC_PATH가 대신한다.
+    역할을 하게 됨. 실시간 상태의 원본은 workbench.db다(실시간 동기화 엑셀은
+    2026-10-07에 폐지).
 
     구조 문제와 해결: 공유파일의 기존 날짜별 시트("M-D")는 이 마감 파일과
     달리 한 시트 안에 여러 날짜 배너가 쌓이는 옛 구조(board_sync.py 참고)라,
@@ -851,20 +851,5 @@ def _trigger_dashboard_refresh(iso_dates):
         )
     except Exception:
         logger.warning("Dashboard 자동 갱신 실행 실패 (마감 자체는 정상 완료됨)", exc_info=True)
-
-
-def sync_delivery_excel():
-    """workbench.db의 현재 상태를 기존 배송장 엑셀(EXCEL_PATH - 예전부터 써온
-    실시간 배송장, board_sync.py 상단 docstring 참고)의 오늘 시트에 반영한다.
-    board_sync.sync()를 그 자리에서 바로 호출(서브프로세스 아님 - 순수
-    파이썬+xlwings 호출이라 콘솔 창 걱정이 없고, 결과 건수를 그대로 돌려줄
-    수 있어 마감 버튼처럼 toast에 몇 건 반영됐는지 보여줄 수 있음).
-
-    2026-08-28 사용자 요청: workbench가 진짜 메인이 될 때까지, 예전부터
-    써온 배송장 엑셀도 손으로 안 맞춰도 되게 하기 위한 임시 다리 -
-    workbench가 충분히 안정화되면 이 버튼째로 치우면 됨. 이미 있는 오더는
-    건드리지 않고 누락된 것만 추가하므로 여러 번 눌러도 안전."""
-    import board_sync
-    return board_sync.sync()
 
 
