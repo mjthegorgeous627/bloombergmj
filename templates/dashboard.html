@@ -1187,7 +1187,11 @@ async function runZrecPrepare(){
       const okOrderIds=new Set(
         ok.map(r=>{ const row=ROWS.find(x=>x.itemId===r.itemId); return row ? row.orderId : null; }).filter(Boolean)
       );
-      const doneRows=ROWS.filter(r=>okItemIds.has(r.itemId) || okOrderIds.has(r.orderId));
+      // 2026-10-07: "같은 오더 전부 파랑"이 날짜가 안 온(예정) 형제 행까지 파랑으로 만들어,
+      // 그 행이 완료로 오인돼 마감까지 나가던 경로(ZRX 67103429 회수 10/8). 확인된 행
+      // 자신은 날짜 무관하게, 같은 오더의 다른 행은 오늘 이전/당일 날짜일 때만 포함한다.
+      const todayIsoLocal=localTodayIso();
+      const doneRows=ROWS.filter(r=>okItemIds.has(r.itemId) || (okOrderIds.has(r.orderId) && r.date<=todayIsoLocal));
       try{
         await persistItemStatus(doneRows.map(r=>r.itemId), 'done');
         doneRows.forEach(r=>{ r.uiStatus='done'; });
@@ -2811,6 +2815,9 @@ async function runQuickSettlement(){
 // 뺀다(체크도 해제), (2) 마감이 진행 중인 동안 재클릭을 막는다(응답이 느릴 때
 // 다시 눌러 같은 행이 두 번 내보내진 사고). 서버도 같은 검증을 한 번 더 한다
 // (items.check_finalizable).
+function localTodayIso(){
+  return new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+}
 let FINALIZING=false;
 const FINALIZABLE_UI_STATUSES=['done','cancelled','billed'];
 async function finalizeChecked(){
@@ -2819,7 +2826,7 @@ async function finalizeChecked(){
   const allChecked=ROWS.filter(r=>checkedRowKeys.has(r.rowKey));
   // 2026-10-06 ZRX 67103429: 파랑(done)인데 날짜가 아직 안 온(예: 10/8) 회수가 10/2에 마감돼
   // 사라졌다. 오늘 뒤 날짜의 done은 마감 대상이 아니다(취소/billed는 예외, 서버도 동일 검증).
-  const todayIso=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const todayIso=localTodayIso();
   const notReady=allChecked.filter(r=>!FINALIZABLE_UI_STATUSES.includes(r.uiStatus)
     || (r.uiStatus==='done' && r.date>todayIso));
   if(notReady.length){
