@@ -377,6 +377,8 @@ _FINALIZE_MIRROR_HEADER_RGB = (251, 227, 214)  # FBE3D6
 # 마감 대상은 전부 완료(파랑) 처리된 것들이므로, board_sync.py가 오늘 도입한
 # 상태색(done=#bfdbfe)과 통일 - 실시간동기화/공유파일이 같은 색 언어를 쓰게 함.
 _FINALIZE_MIRROR_DATA_RGB = (191, 219, 254)
+_FINALIZE_MIRROR_CANCELLED_RGB = (217, 217, 217)  # D9D9D9
+_FINALIZE_MIRROR_BILLED_RGB = (146, 208, 80)      # 92D050
 _FINALIZE_MIRROR_HL_BG = {"yellow": (255, 255, 0), "pink": (255, 192, 203)}
 _FINALIZE_MIRROR_HL_FONT = {"red": (255, 0, 0)}
 _FINALIZE_MIRROR_HL_FIELDS_BY_COL = {
@@ -444,13 +446,17 @@ def write_finalized_sheet_com(wb, sheet_name, d, rows):
             8: (row.get("memo") or "") if mf.get("memo", True) else "",
         }
         highlights = row.get("highlights") or {}
+        # 취소=회색, billed=초록 (마감파일 _write_export_sheet와 같은 규칙) - 안 그러면
+        # 취소한 행도 완료(파랑)처럼 아카이브에 남는다.
+        default_rgb = (_FINALIZE_MIRROR_CANCELLED_RGB if row.get("cancelled")
+                       else _FINALIZE_MIRROR_BILLED_RGB if row.get("billed") else _FINALIZE_MIRROR_DATA_RGB)
         for col in range(1, 9):
             cell = ws.cells(r, col)
             cell.value = values[col]
             style = next(
                 (highlights[f] for f in _FINALIZE_MIRROR_HL_FIELDS_BY_COL[col] if highlights.get(f)), None
             )
-            cell.color = _FINALIZE_MIRROR_HL_BG.get((style or {}).get("bg"), _FINALIZE_MIRROR_DATA_RGB)
+            cell.color = _FINALIZE_MIRROR_HL_BG.get((style or {}).get("bg"), default_rgb)
             if col == 8 or (style and style.get("bold")):
                 cell.api.Font.Bold = True
             if style and style.get("color") in _FINALIZE_MIRROR_HL_FONT:
