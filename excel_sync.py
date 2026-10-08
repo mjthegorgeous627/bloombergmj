@@ -628,7 +628,12 @@ def _write_export_sheet(wb, sheet_name, iso, rows):
     needs to branch on "does it already exist"."""
     d = date.fromisoformat(iso)
     existing = sheet_name in wb.sheetnames
-    ws = wb[sheet_name] if existing else wb.create_sheet(sheet_name)
+    if existing:
+        ws = wb[sheet_name]
+    else:
+        # 날짜 오름차순 위치에 만든다 (맨 뒤에 붙이면 시트 순서가 뒤죽박죽이 됨)
+        before = excel_handler._date_ordered_neighbor(wb.sheetnames, sheet_name)
+        ws = wb.create_sheet(sheet_name, wb.sheetnames.index(before) if before else None)
 
     if existing:
         row_cursor = max(ws.max_row + 1, 3)

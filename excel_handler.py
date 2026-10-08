@@ -399,6 +399,24 @@ def _finalize_mirror_order_cell_text(row):
     return order_cell
 
 
+def _sheet_date_key(name):
+    m = re.match(r"^(\d{1,2})-(\d{1,2})(?: \(마감\))?$", str(name).strip())
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _date_ordered_neighbor(sheet_names, new_name):
+    """새 날짜 시트를 넣을 위치: 자기보다 늦은 날짜 시트 중 가장 앞의 것 '앞'.
+    없으면 None (맨 뒤). 시트가 날짜 오름차순으로 유지되게 한다."""
+    key = _sheet_date_key(new_name)
+    if key is None:
+        return None
+    for n in sheet_names:
+        k = _sheet_date_key(n)
+        if k is not None and k > key:
+            return n
+    return None
+
+
 def write_finalized_sheet_com(wb, sheet_name, d, rows):
     """마감(확정)된 rows(workbench_app.py의 _write_export_sheet가 받는 것과
     동일한 dict 모양 - itemType/orderLabel/deliveryNo/description/material/
@@ -414,7 +432,11 @@ def write_finalized_sheet_com(wb, sheet_name, d, rows):
         used = _com_retry(lambda: ws.used_range)
         row_cursor = max(used.last_cell.row + 1, 3)
     else:
-        ws = wb.sheets.add(sheet_name, after=wb.sheets[-1])
+        before = _date_ordered_neighbor(names, sheet_name)
+        if before:
+            ws = wb.sheets.add(sheet_name, before=wb.sheets[before])
+        else:
+            ws = wb.sheets.add(sheet_name, after=wb.sheets[-1])
         for col, width in _FINALIZE_MIRROR_COL_WIDTHS.items():
             _com_retry(lambda col=col, width=width: setattr(ws.api.Columns(col), "ColumnWidth", width))
         banner_cell = ws.cells(1, 7)
