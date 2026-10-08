@@ -15,10 +15,9 @@ from datetime import date
 from pathlib import Path
 
 import openpyxl
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 import excel_handler
-from config import EXCEL_PATH, FINALIZE_EXPORT_PATH
+from config import EXCEL_PATH
 from db import (
     BASE_DIR,
     _pop_prior_item_state,
@@ -549,233 +548,35 @@ def import_sap_rows(rows):
     return {"imported": len(rows), "orderId": order_id}
 
 
-EXPORT_HEADER = ["Order #", "item", "M/N", "S/N", "customer", "phone", "ADDRESS", "memo"]
-
-_KOREAN_WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
-
-# Column widths and per-column cell styling, matched against an existing
-# hand-formatted sheet (verified against "7-27": header fill is the theme
-# accent2 color tinted +0.8, or "FBE3D6" computed out to RGB; data-row fill
-# is the plain blue "00B0F0" Excel uses for "done" rows). Column A carries
-# its own item_type/order_label/delivery_no line on every row (never blank
-# for continuation - the original sheets always repeat it), while columns
-# E-H (customer/phone/address/memo) are merged down the whole customer
-# group, same as the original sheets build via SAP collection.
-_EXPORT_COL_WIDTHS = {1: 23.375, 2: 40.0, 3: 13.75, 4: 14.5, 5: 16.625, 6: 19.875, 7: 47.75, 8: 25.125}
-_EXPORT_HEADER_FILL = PatternFill(fill_type="solid", fgColor="FBE3D6")
-_EXPORT_DATA_FILL = PatternFill(fill_type="solid", fgColor="00B0F0")
-# 취소(cancelled) 행 채우기 - vendor_dashboard.py의 _is_completed_row()가 이 파일의
-# 셀 색으로 "완료"(파란 00B0F0)와 "취소"(회색, 카운트 제외)를 구분한다(원래
-# 수기로 관리하던 배송장의 오래된 규칙). 예전엔 취소 행이 마감 체크박스에서
-# 자동 선택 안 돼 이 파일에 거의 안 들어왔지만, 2026-09-28에 취소 행도
-# 마감 대상에 포함시키면서 색 구분 없이 그대로 두면 취소 건이 파란색으로
-# 찍혀 완료로 잘못 집계될 뻔했다 - 따로 회색을 넣어 막는다.
-_EXPORT_CANCELLED_FILL = PatternFill(fill_type="solid", fgColor="D9D9D9")
-_EXPORT_BILLED_FILL = PatternFill(fill_type="solid", fgColor="92D050")  # billed: 대시보드 집계(00B0F0 기준) 제외
-_EXPORT_THIN_BORDER = Border(*(Side(style="thin"),) * 4)
-_EXPORT_COL_ALIGN = {
-    1: Alignment(vertical="top", wrap_text=True),
-    2: Alignment(horizontal="left", vertical="center", wrap_text=True),
-    3: Alignment(horizontal="center", vertical="center"),
-    4: Alignment(horizontal="center", vertical="center"),
-    5: Alignment(horizontal="center", vertical="center"),
-    6: Alignment(horizontal="center", vertical="center", wrap_text=True),
-    7: Alignment(horizontal="center", vertical="center", wrap_text=True),
-    8: Alignment(horizontal="center", vertical="top", wrap_text=True),
-}
-# Manual cell_highlights carried into the export: column 1 (Order #) also
-# carries the Type text (see _order_cell_text below, there's no separate
-# Type column in this sheet layout - matches the hand-built originals), so a
-# "type" highlight is checked as a fallback for column 1 if "order" isn't
-# set. Every other column maps to exactly one highlight field.
-_EXPORT_HIGHLIGHT_FIELDS_BY_COL = {
-    1: ("order", "type"), 2: ("description",), 3: ("material",), 4: ("serial",),
-    5: ("customer",), 6: ("phone",), 7: ("address",), 8: ("memo",),
-}
-_EXPORT_HIGHLIGHT_FILL = {
-    "yellow": PatternFill(fill_type="solid", fgColor="FFFF00"),
-    "pink": PatternFill(fill_type="solid", fgColor="FFC0CB"),
-}
-_EXPORT_HIGHLIGHT_FONT_COLOR = {"red": "FFFF0000"}
-
-
-def _order_cell_text(row):
-    order_cell = str(row.get("itemType") or "").strip()
-    label = str(row.get("orderLabel") or "").strip()
-    if label:
-        order_cell = f"{order_cell} {label}".strip()
-    codes = str(row.get("deliveryNo") or "").strip()
-    if codes:
-        order_cell = f"{order_cell}\n{codes}" if order_cell else codes
-    return order_cell
-
-
-def _write_export_sheet(wb, sheet_name, iso, rows):
-    """Writes `rows` into `sheet_name`. If that sheet doesn't exist yet,
-    creates it fresh (date banner + headers + data, as before). If it
-    already exists - a prior 마감 for this exact date already made it -
-    appends `rows` starting right after its last used row instead: no new
-    "(2)"-suffixed sheet, no rewriting the banner/header above.
-
-    2026-08-27 (user request): an order whose 마감 slips past its own day
-    (e.g. a POD/SAP issue only gets resolved a few days later) should stay on
-    the workbench board, unchecked, while everything else for that date gets
-    마감-ed normally; once it's later resolved and checked off, 마감-ing it
-    should land it at the bottom of the date it always belonged to - not
-    spawn a duplicate sheet for that date. Since export_dates_to_excel() now
-    always targets the exact "{month}-{day}" sheet name (no more
-    _unique_sheet_name() collision-avoidance), this is the only place that
-    needs to branch on "does it already exist"."""
-    d = date.fromisoformat(iso)
-    existing = sheet_name in wb.sheetnames
-    if existing:
-        ws = wb[sheet_name]
-    else:
-        # 날짜 오름차순 위치에 만든다 (맨 뒤에 붙이면 시트 순서가 뒤죽박죽이 됨)
-        before = excel_handler._date_ordered_neighbor(wb.sheetnames, sheet_name)
-        ws = wb.create_sheet(sheet_name, wb.sheetnames.index(before) if before else None)
-
-    if existing:
-        row_cursor = max(ws.max_row + 1, 3)
-    else:
-        for col, width in _EXPORT_COL_WIDTHS.items():
-            ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
-
-        # Row 1: date banner (bold, only the ADDRESS column carries the text,
-        # same position as the original sheets).
-        date_cell = ws.cell(row=1, column=7)
-        date_cell.value = f"{d.year}년 {d.month}월 {d.day}일 {_KOREAN_WEEKDAYS[d.weekday()]}요일"
-        date_cell.font = Font(bold=True)
-        date_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-        # Row 2: column headers.
-        for col, label in enumerate(EXPORT_HEADER, start=1):
-            cell = ws.cell(row=2, column=col)
-            cell.value = label
-            cell.fill = _EXPORT_HEADER_FILL
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = _EXPORT_THIN_BORDER
-        row_cursor = 3
-
-    # Data rows. Each of E-H (customer/phone/address/memo) merges down its
-    # OWN contiguous run independently, per row["mergeFirst"][field] (built
-    # client-side by buildExportRows/computeFieldSpans) - a real case can
-    # share e.g. just the address across rows with different customer names,
-    # so this can no longer be one shared group boundary for all 4 columns.
-    # This merge run is scoped only to the rows being written THIS call - an
-    # appended block never merges upward into whatever's already above it.
-    n = len(rows)
-    row_numbers = [row_cursor + i for i in range(n)]
-
-    for i, row in enumerate(rows):
-        r = row_numbers[i]
-        mf = row.get("mergeFirst") or {}
-        values = {
-            1: _order_cell_text(row),
-            2: row.get("description") or "",
-            3: row.get("material") or "",
-            4: row.get("serial") or "",
-            5: (row.get("customer") or "") if mf.get("customer", True) else "",
-            6: (row.get("phone") or "") if mf.get("phone", True) else "",
-            7: (row.get("address") or "") if mf.get("address", True) else "",
-            8: (row.get("memo") or "") if mf.get("memo", True) else "",
-        }
-        highlights = row.get("highlights") or {}
-        default_fill = (_EXPORT_CANCELLED_FILL if row.get("cancelled")
-                        else _EXPORT_BILLED_FILL if row.get("billed") else _EXPORT_DATA_FILL)
-        for col in range(1, 9):
-            cell = ws.cell(row=r, column=col)
-            cell.value = values[col]
-            style = next(
-                (highlights[f] for f in _EXPORT_HIGHLIGHT_FIELDS_BY_COL[col] if highlights.get(f)), None
-            )
-            cell.fill = _EXPORT_HIGHLIGHT_FILL.get((style or {}).get("bg"), default_fill)
-            font_kwargs = {}
-            if col == 8:
-                font_kwargs["bold"] = True
-            if style and style.get("bold"):
-                font_kwargs["bold"] = True
-            if style and style.get("color") in _EXPORT_HIGHLIGHT_FONT_COLOR:
-                font_kwargs["color"] = _EXPORT_HIGHLIGHT_FONT_COLOR[style["color"]]
-            if font_kwargs:
-                cell.font = Font(**font_kwargs)
-            cell.alignment = _EXPORT_COL_ALIGN[col]
-            cell.border = _EXPORT_THIN_BORDER
-
-    for field, col in zip(("customer", "phone", "address", "memo"), (5, 6, 7, 8)):
-        i = 0
-        while i < n:
-            j = i + 1
-            while j < n and not (rows[j].get("mergeFirst") or {}).get(field, True):
-                j += 1
-            if j - i > 1:
-                ws.merge_cells(start_row=row_numbers[i], start_column=col, end_row=row_numbers[j - 1], end_column=col)
-            i = j
-
-    row_cursor = (row_numbers[-1] + 1) if n else row_cursor
-    return ws, row_cursor - 1
-
-
 def export_dates_to_excel(dates_payload):
-    """
-    Writes the board's current (client-side) state for the given dates into
-    the "마감" export workbook (FINALIZE_EXPORT_PATH - a dedicated file,
-    separate from the live daily-collection workbook EXCEL_PATH, per user
-    request 2026-08-14) - one sheet per date, named the same "{month}-{day}"
-    way `today_sheet_names()` looks for them (e.g. "7-29"). Existing sheets
-    are never deleted or overwritten: a date exported for the first time
-    gets a fresh sheet, but 마감-ing that SAME date again later (e.g. one
-    order's 마감 slipped a few days past everything else - 2026-08-27 user
-    request) appends the newly-checked rows to the bottom of that same
-    "7-29" sheet instead of spawning "7-29 (2)" - see _write_export_sheet().
-    The board's data still comes from the client's in-memory `ROWS`, not
-    workbench.db, since nothing this session persists there yet. Formatting
-    (column widths, header fill, blue "done" fill, borders, merged
-    customer/phone/address/memo per group) matches the hand-built sheets SAP
-    collection produces.
+    """마감(확정)된 데이터를 배송장 파일(EXCEL_PATH, "2026 배송장.xlsx") 하나에만 쓴다.
 
-    Takes a full backup of the export workbook before writing - this is the
-    one action in this app that touches a real, persistent Excel file
-    (everything else here is screen-only), so a mistake here is not casually
-    undoable the way an in-browser action is.
+    2026-10-08 통합: 예전엔 별도 "마감 파일"(FINALIZE_EXPORT_PATH)에 openpyxl로 먼저
+    쓰고 공유파일에 COM으로 한 번 더 반영했는데, 두 파일이 달라지는 사고가 반복돼
+    공유파일 하나로 합쳤다. Dashboard / 이력 검색 / 퀵 금액 정리도 이 파일을 읽는다.
 
-    Once the save below succeeds, also kicks off vendor_dashboard.py in the
-    background for every exported date (2026-08-25: 마감 IS what freezes a
-    day's colors/rows into this same file, so it's the natural point to keep
-    the local Vendor Activities Dashboard copy/paste sheet in sync - no
-    separate manual step to remember). That refresh is fire-and-forget: its
-    own failure must never make 마감 itself look like it failed.
-    """
-    excel_path = Path(FINALIZE_EXPORT_PATH)
+    {iso날짜: rows}를 날짜별 "M-D" 시트로 쓰고(없으면 날짜 순서 위치에 새로 만들고, 있으면
+    맨 끝에 이어붙임 - excel_handler.write_finalized_sheet_com), 쓰기가 실패하면 예외를
+    그대로 올려 호출부(/api/export)가 마감 실패로 처리한다 - 이 경우 workbench.db 항목은
+    삭제되지 않는다. 성공한 뒤에만 Dashboard 갱신과 이력 색인을 백그라운드로 건다.
+    쓰기 직전에 직전 상태를 `.before_last_마감` 사본 1개로 덮어써 둔다(한 단계 되돌리기용)."""
+    excel_path = Path(EXCEL_PATH)
     if not excel_path.exists():
-        # openpyxl은 시트가 0개인 워크북 저장을 거부하므로 기본 빈 "Sheet"는
-        # 그대로 둔다 - 실제 마감 시트들과 나란히 있어도 무해함.
-        excel_path.parent.mkdir(parents=True, exist_ok=True)
-        openpyxl.Workbook().save(excel_path)
+        raise FileNotFoundError(f"배송장 파일을 찾을 수 없음: {excel_path}")
 
-    # 마감을 누를 때마다 새 타임스탬프 파일을 만들면 이 파일 자체가 이미
-    # "마감 전용 백업 파일"이라 backup-of-a-backup이 무한정 쌓인다 (사용자
-    # 지적, 2026-08-14). 그래서 백업은 이름 고정 1개만 두고 매번 덮어쓴다 -
-    # "직전 저장 시점으로 한 단계만 되돌릴 수 있는" 안전장치는 유지하되
-    # 파일이 쌓이지는 않음.
-    backup_path = excel_path.with_name(f"{excel_path.stem}.before_last_export{excel_path.suffix}")
+    backup_path = excel_path.with_name(f"{excel_path.stem}.before_last_마감{excel_path.suffix}")
     shutil.copy2(excel_path, backup_path)
 
-    wb = openpyxl.load_workbook(excel_path)
-    try:
-        result = {}
-        for iso, rows in dates_payload.items():
-            d = date.fromisoformat(iso)
-            sheet_name = f"{d.month}-{d.day}"
-            _write_export_sheet(wb, sheet_name, iso, rows)
-            result[iso] = {"sheet": sheet_name, "rows": len(rows)}
-        wb.save(excel_path)
-        _trigger_dashboard_refresh(list(dates_payload.keys()))
-        _trigger_history_reindex(excel_path)
-        archive = _mirror_finalize_to_shared_excel(dates_payload)
-        return {"exported": result, "backup": str(backup_path), "archive": archive}
-    finally:
-        wb.close()
+    excel_handler.mirror_finalized_rows_to_excel_path(dates_payload)
+
+    result = {}
+    for iso, rows in dates_payload.items():
+        d = date.fromisoformat(iso)
+        result[iso] = {"sheet": f"{d.month}-{d.day}", "rows": len(rows)}
+    logger.info(f"배송장 마감 반영 완료: {list(dates_payload.keys())}")
+    _trigger_dashboard_refresh(list(dates_payload.keys()))
+    _trigger_history_reindex(excel_path)
+    return {"exported": result, "backup": str(backup_path), "archive": {"ok": True}}
 
 
 def _trigger_history_reindex(excel_path):
@@ -788,58 +589,6 @@ def _trigger_history_reindex(excel_path):
         history_search.reindex_async(files=[Path(excel_path)])
     except Exception:
         logger.warning("이력 검색 색인 갱신 실행 실패 (마감 자체는 정상 완료됨)", exc_info=True)
-
-
-def _mirror_finalize_to_shared_excel(dates_payload):
-    """마감(확정)된 데이터를 공유파일(EXCEL_PATH)에도 그대로 반영한다
-    (2026-09-01 사용자 결정).
-
-    배경: 공유파일은 다른 사람들과 공유하는 파일이라 항상 깔끔해야 하는데,
-    지금까지는 매일 SAP 자동수집이 "아직 확정 전"인 진행중 상태까지 직접
-    써서 지저분해졌었다. 그 자동쓰기는 이제 껐고(main.py/manual_order_
-    handler.py), 대신 workbench에서 실제로 "완료"로 확정 처리된 마감 데이터만
-    이 함수로 공유파일에 반영한다 - 공유파일이 "1년치 확정 기록 아카이브"
-    역할을 하게 됨. 실시간 상태의 원본은 workbench.db다(실시간 동기화 엑셀은
-    2026-10-07에 폐지).
-
-    구조 문제와 해결: 공유파일의 기존 날짜별 시트("M-D")는 이 마감 파일과
-    달리 한 시트 안에 여러 날짜 배너가 쌓이는 옛 구조(board_sync.py 참고)라,
-    "한 시트=한 날짜" 가정으로 그대로 이어붙이면 데이터가 시트 맨 끝(전혀
-    다른 미래 날짜 배너 밑)에 엉뚱하게 붙는다. 그런 시트(배너가 2개 이상)를
-    만나면 건드리지 않고 "{sheet_name} (마감)"이라는 구분되는 이름으로 대신
-    만든다(excel_handler.mirror_finalized_rows_to_excel_path 안에서 처리) -
-    앞으로 새로 마감되는 날짜는 이 옛 구조 시트가 없을 것이므로(이 전환
-    이후로는 공유파일에 새 날짜 시트가 자동생성 안 됨) 자연스럽게 깨끗한
-    "한 시트=한 날짜" 구조로 자리잡는다.
-
-    2026-09-02 openpyxl→COM 전환: 처음엔 openpyxl(_write_export_sheet 재사용
-    시도)로 짰다가 실제로 두 번 다 PermissionError로 실패했다 - 공유파일은
-    사람이 실제로 Excel에 열어놓고 보는 경우가 흔한데, openpyxl의 일반 파일
-    저장은 그렇게 열려있는 파일에 못 쓴다. write_orders_to_excel()이 이미
-    검증해온 xlwings/COM 경로(excel_handler.get_workbook())로 옮겼다 - 열려
-    있는 세션에 그대로 붙어서 실시간 반영된다.
-
-    실패해도 마감 자체(위에서 이미 저장 완료)를 막지 않는다 - _trigger_
-    dashboard_refresh()와 같은 이유로 로그만 남기고 넘어간다."""
-    excel_path = Path(EXCEL_PATH)
-    if not excel_path.exists():
-        logger.warning(f"공유파일 없음, 마감 반영 스킵: {excel_path}")
-        return {"ok": False, "error": f"공유파일을 찾을 수 없음: {excel_path}"}
-
-    backup_path = excel_path.with_name(f"{excel_path.stem}.before_last_마감{excel_path.suffix}")
-    try:
-        shutil.copy2(excel_path, backup_path)
-    except Exception:
-        logger.error("공유파일 백업 실패 - 반영은 계속 시도", exc_info=True)
-
-    try:
-        excel_handler.mirror_finalized_rows_to_excel_path(dates_payload)
-        logger.info(f"공유파일 마감 반영 완료: {list(dates_payload.keys())}")
-        return {"ok": True}
-    except Exception as exc:
-        logger.error("공유파일(EXCEL_PATH) 마감 반영 실패 (마감 자체는 정상 완료됨)", exc_info=True)
-        # 화면에 알려서 사용자가 바로 알게 한다 (2026-10-08: 10/6 실패가 로그에만 남아 몰랐음)
-        return {"ok": False, "error": str(exc) or exc.__class__.__name__}
 
 
 def _trigger_dashboard_refresh(iso_dates):

@@ -316,6 +316,10 @@ tbody.date-group.collapsed .item-row,tbody.date-group.collapsed .empty-row{displ
         <button class="btn" onclick="runOrderJumpAction()">오더 바로가기</button>
         <input id="orderJumpInput" placeholder="오더번호" onkeydown="if(event.key==='Enter'){event.preventDefault();runOrderJumpAction();}">
       </div>
+      <div class="ctrl-inline" title="새 SAP 세션에서 ZIH08을 열어 시리얼을 넣고 Execute까지 실행해 상태를 보여줌 (조회 전용)">
+        <button class="btn" onclick="runSerialLookupAction()">시리얼 조회</button>
+        <input id="serialLookupInput" placeholder="Serial Number" onkeydown="if(event.key==='Enter'){event.preventDefault();runSerialLookupAction();}">
+      </div>
       <div class="ctrl-inline">
         <button class="btn" onclick="runNewSessionAction()">4. New SAP session open</button>
         <input id="tcodeInput" placeholder="T-code (선택)" onkeydown="if(event.key==='Enter'){event.preventDefault();runNewSessionAction();}">
@@ -686,6 +690,23 @@ async function runOrderJumpAction(){
     input.value='';
   }catch(err){
     toast('오더 바로가기 실패: '+err.message);
+  }
+}
+async function runSerialLookupAction(){
+  const input=document.getElementById('serialLookupInput');
+  const v=input.value.trim();
+  if(!v){toast('시리얼을 입력하세요');return}
+  try{
+    const res=await fetch('/api/sap/open_serial', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({serial:v})
+    });
+    const data=await res.json();
+    if(!res.ok || data.error) throw new Error(data.error||'실행 실패');
+    if(!data.started){toast(data.message);return}
+    toast('시리얼 '+v+' ZIH08 조회 중 (PID '+data.pid+')');
+    input.value='';
+  }catch(err){
+    toast('시리얼 조회 실패: '+err.message);
   }
 }
 async function runNewSessionAction(){
@@ -2845,7 +2866,7 @@ async function finalizeCheckedRun(checkedRows, checkedRowKeys, isos, payload){
     exportData=await res.json();
     if(!res.ok || exportData.error){throw new Error(exportData.error||'내보내기 실패')}
   }catch(err){
-    window.alert('마감 실패 (엑셀로 내보내지 못해 workbench.db는 그대로 둠)\n\n'+err.message);
+    window.alert('마감 실패 (배송장에 저장하지 못해 workbench.db는 그대로 둠)\n\n'+err.message+'\n\n배송장에 일부 반영됐을 수 있으니 오늘 날짜 시트를 확인한 뒤 다시 마감하세요.');
     return;
   }
   const itemIds=checkedRows.map(r=>r.itemId);
@@ -2864,12 +2885,6 @@ async function finalizeCheckedRun(checkedRows, checkedRowKeys, isos, payload){
   isos.forEach(iso=>EXPORT_DATES.delete(iso));
   renderAll();
   toast(checkedRows.length+'건 마감 완료 - '+summary+' / workbench.db 정리됨 (7일간 복구 가능)');
-  const arc=exportData.archive||{};
-  if(arc.ok===false){
-    window.alert('마감은 됐지만 공유파일(아카이브) 반영이 실패했습니다.\n\n'+(arc.error||'')+'\n\n오늘 날짜 시트가 공유파일에 없으니 확인이 필요합니다.');
-  }else if(arc.ok){
-    toast('공유파일(아카이브) 반영 완료');
-  }
 }
 
 // -- Delete: removes checked rows from the board AND from workbench.db

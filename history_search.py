@@ -32,7 +32,7 @@ BASE_DIR = Path(__file__).resolve().parent
 HISTORY_DB_PATH = BASE_DIR / "history.db"
 SHIPPING_DIR = Path(r"C:\1\배송장")
 _MAX_COLS = 14
-_SKIP_NAME_PARTS = ("before_last", "실시간", "DN&PN")
+_SKIP_NAME_PARTS = ("before_last", "실시간", "DN&PN", "_마감")  # _마감: 2026-10-08 폐지(배송장 파일 하나로 통합)
 _INDEX_LOCK = threading.Lock()
 
 _ORDER_RE = re.compile(r"(?<!\d)(\d{7,9})(?!\d)")

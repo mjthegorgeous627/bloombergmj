@@ -21,14 +21,14 @@ from pathlib import Path
 
 import xlwings as xw
 
-from config import FINALIZE_EXPORT_PATH
+from config import EXCEL_PATH
 from excel_handler import _com_retry
 from order_lock import ExcelWriteLock
 
 
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = BASE_DIR / "automation.log"
-SOURCE_EXCEL_PATH = FINALIZE_EXPORT_PATH
+SOURCE_EXCEL_PATH = EXCEL_PATH  # 2026-10-08: 마감 파일을 폐지하고 배송장 파일 하나로 통합
 DASHBOARD_EXCEL_PATH = str(
     Path(r"C:\1")
     / "\ubc30\uc1a1\uc7a5"
