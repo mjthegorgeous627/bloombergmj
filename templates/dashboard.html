@@ -2866,11 +2866,7 @@ async function finalizeCheckedRun(checkedRows, checkedRowKeys, isos, payload){
   toast(checkedRows.length+'건 마감 완료 - '+summary+' / workbench.db 정리됨 (7일간 복구 가능)');
   const arc=exportData.archive||{};
   if(arc.ok===false){
-    window.alert('마감은 됐지만 공유파일(아카이브) 반영이 실패했습니다.
-
-'+(arc.error||'')+'
-
-오늘 날짜 시트가 공유파일에 없으니 확인이 필요합니다.');
+    window.alert('마감은 됐지만 공유파일(아카이브) 반영이 실패했습니다.\n\n'+(arc.error||'')+'\n\n오늘 날짜 시트가 공유파일에 없으니 확인이 필요합니다.');
   }else if(arc.ok){
     toast('공유파일(아카이브) 반영 완료');
   }
