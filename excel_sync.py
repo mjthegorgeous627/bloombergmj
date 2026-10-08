@@ -767,8 +767,8 @@ def export_dates_to_excel(dates_payload):
         wb.save(excel_path)
         _trigger_dashboard_refresh(list(dates_payload.keys()))
         _trigger_history_reindex(excel_path)
-        _mirror_finalize_to_shared_excel(dates_payload)
-        return {"exported": result, "backup": str(backup_path)}
+        archive = _mirror_finalize_to_shared_excel(dates_payload)
+        return {"exported": result, "backup": str(backup_path), "archive": archive}
     finally:
         wb.close()
 
@@ -819,7 +819,7 @@ def _mirror_finalize_to_shared_excel(dates_payload):
     excel_path = Path(EXCEL_PATH)
     if not excel_path.exists():
         logger.warning(f"공유파일 없음, 마감 반영 스킵: {excel_path}")
-        return
+        return {"ok": False, "error": f"공유파일을 찾을 수 없음: {excel_path}"}
 
     backup_path = excel_path.with_name(f"{excel_path.stem}.before_last_마감{excel_path.suffix}")
     try:
@@ -830,8 +830,11 @@ def _mirror_finalize_to_shared_excel(dates_payload):
     try:
         excel_handler.mirror_finalized_rows_to_excel_path(dates_payload)
         logger.info(f"공유파일 마감 반영 완료: {list(dates_payload.keys())}")
-    except Exception:
+        return {"ok": True}
+    except Exception as exc:
         logger.error("공유파일(EXCEL_PATH) 마감 반영 실패 (마감 자체는 정상 완료됨)", exc_info=True)
+        # 화면에 알려서 사용자가 바로 알게 한다 (2026-10-08: 10/6 실패가 로그에만 남아 몰랐음)
+        return {"ok": False, "error": str(exc) or exc.__class__.__name__}
 
 
 def _trigger_dashboard_refresh(iso_dates):

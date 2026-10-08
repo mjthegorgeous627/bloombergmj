@@ -376,7 +376,7 @@ _FINALIZE_MIRROR_HEADER = ["Order #", "item", "M/N", "S/N", "customer", "phone",
 _FINALIZE_MIRROR_HEADER_RGB = (251, 227, 214)  # FBE3D6
 # 마감 대상은 전부 완료(파랑) 처리된 것들이므로, board_sync.py가 오늘 도입한
 # 상태색(done=#bfdbfe)과 통일 - 실시간동기화/공유파일이 같은 색 언어를 쓰게 함.
-_FINALIZE_MIRROR_DATA_RGB = (191, 219, 254)
+_FINALIZE_MIRROR_DATA_RGB = (0, 176, 240)  # 00B0F0, 마감파일과 동일
 _FINALIZE_MIRROR_CANCELLED_RGB = (217, 217, 217)  # D9D9D9
 _FINALIZE_MIRROR_BILLED_RGB = (146, 208, 80)      # 92D050
 _FINALIZE_MIRROR_HL_BG = {"yellow": (255, 255, 0), "pink": (255, 192, 203)}
