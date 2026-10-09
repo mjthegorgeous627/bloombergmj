@@ -73,7 +73,9 @@ NOTES_PAGE_TEMPLATE = (TEMPLATES_DIR / "notes.html").read_text(encoding="utf-8")
 
 
 
-PAGE_TEMPLATE = (TEMPLATES_DIR / "dashboard.html").read_text(encoding="utf-8")
+import dashboard_assets
+
+PAGE_TEMPLATE = dashboard_assets.assemble("dashboard.html", TEMPLATES_DIR)  # CSS/JS 조각을 끼워 넣은 완성본 (dashboard_assets.py 참고)
 
 
 _FINALIZE_LOCK = threading.Lock()
