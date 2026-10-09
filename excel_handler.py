@@ -451,7 +451,7 @@ def write_finalized_sheet_com(wb, sheet_name, d, rows):
 
     n = len(rows)
     if n == 0:
-        return ws
+        return ws, row_cursor
     row_numbers = [row_cursor + i for i in range(n)]
 
     for i, row in enumerate(rows):
@@ -507,7 +507,7 @@ def write_finalized_sheet_com(wb, sheet_name, d, rows):
             i = j
 
     _com_retry(lambda: ws.api.Rows(f"{row_cursor}:{row_numbers[-1]}").AutoFit())
-    return ws
+    return ws, row_cursor
 
 
 def mirror_finalized_rows_to_excel_path(dates_payload):
@@ -523,7 +523,8 @@ def mirror_finalized_rows_to_excel_path(dates_payload):
     이상이면 옛 구조로 판단해 건드리지 않고 "{sheet_name} (마감)"이라는
     새 이름으로 대신 만든다."""
     with ExcelWriteLock():
-        wb = get_workbook()
+        wb = _get_workbook_checked()
+        written = []
         for iso, rows in dates_payload.items():
             d = datetime.strptime(iso, "%Y-%m-%d")
             sheet_name = f"{d.month}-{d.day}"
@@ -537,5 +538,60 @@ def mirror_finalized_rows_to_excel_path(dates_payload):
                         banner_count += 1
                 if banner_count > 1:
                     sheet_name = f"{sheet_name} (마감)"
-            write_finalized_sheet_com(wb, sheet_name, d, rows)
+            ws, start_row = write_finalized_sheet_com(wb, sheet_name, d, rows)
+            written.append((sheet_name, ws, start_row, rows))
         wb.save()
+        # 저장 직후, 방금 쓴 행이 시트에 실제로 그대로 들어갔는지 읽어서 대조한다.
+        problems = []
+        for sheet_name, ws, start_row, rows in written:
+            problems += _verify_finalized_rows(sheet_name, ws, start_row, rows)
+        if problems:
+            raise RuntimeError(
+                "배송장 저장 후 검증에서 불일치 발견 - 해당 시트를 직접 확인하세요: "
+                + " / ".join(problems[:5])
+            )
+
+
+def _get_workbook_checked(attempts=3, delay=2.0):
+    """마감 쓰기 직전 점검: 배송장 파일에 연결해 실제로 응답하는지(시트 목록 읽기),
+    읽기 전용으로 열려 있지는 않은지 확인한다. 연결이 끊겨 있으면(2026-10-08에 COM
+    연결 끊김 1회 발생) 잠시 뒤 새로 연결해 다시 시도한다. 끝내 안 되면 쓰기를 시작하기
+    전에 예외를 올려서, 파일에 아무것도 쓰이지 않은 상태로 마감이 실패하게 한다."""
+    last_exc = None
+    for i in range(attempts):
+        try:
+            wb = get_workbook()
+            if len(wb.sheets) == 0:
+                raise RuntimeError("배송장 파일에 시트가 없음")
+            if wb.api.ReadOnly:
+                raise RuntimeError("배송장 파일이 읽기 전용으로 열려 있음 - 닫고 다시 시도하세요")
+            return wb
+        except Exception as e:
+            last_exc = e
+            if i < attempts - 1:
+                time.sleep(delay)
+    raise RuntimeError(f"배송장 엑셀에 연결하지 못함 (쓰기 시작 전, 파일 변경 없음): {last_exc}")
+
+
+def _verify_finalized_rows(sheet_name, ws, start_row, rows):
+    """방금 쓴 행의 A(오더/종류)·B(품명)·C(자재) 열을 읽어 기대값과 대조. 불일치 목록 반환."""
+    n = len(rows)
+    if n == 0:
+        return []
+    try:
+        vals = _com_retry(lambda: ws.range((start_row, 1), (start_row + n - 1, 3)).value)
+    except Exception as e:
+        return [f"{sheet_name}: 읽기 검증 실패({e})"]
+    if n == 1:
+        vals = [vals]
+    problems = []
+    for i, row in enumerate(rows):
+        exp = (_finalize_mirror_order_cell_text(row), row.get("description") or "", row.get("material") or "")
+        got = vals[i] if i < len(vals) else (None, None, None)
+        for e_val, g_val in zip(exp, got):
+            if isinstance(g_val, float) and g_val.is_integer():
+                g_val = int(g_val)  # 숫자처럼 보이는 자재번호가 엑셀에서 숫자로 읽힌 경우
+            if str(e_val).strip() != ("" if g_val is None else str(g_val)).strip():
+                problems.append(f"{sheet_name} {start_row + i}행")
+                break
+    return problems
