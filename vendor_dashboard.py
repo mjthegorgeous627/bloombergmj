@@ -1,12 +1,9 @@
 """Create a monthly Vendor Activities Dashboard copy/paste sheet.
 
-Reads the "마감" export workbook (FINALIZE_EXPORT_PATH - the day is only
-final, with its colors settled, once it's gone through workbench's 마감
-button) and writes a month sheet such as VAD_05. The generated sheet mirrors
-the Bloomberg dashboard input area so the filled rows can be copied into the
-online workbook. Not the live daily-collection file (EXCEL_PATH) - that one
-keeps changing after the fact (backfills, corrections), so counting from it
-would drift from what 마감 actually froze for a given day.
+Reads the delivery workbook (EXCEL_PATH - since 2026-10-08 the single 배송장 file;
+the 마감 button writes each closed day into it) and writes a month sheet such
+as VAD_05. The generated sheet mirrors the Bloomberg dashboard input area so
+the filled rows can be copied into the online workbook.
 """
 
 import argparse
@@ -453,7 +450,7 @@ def generate(month=None, year=None):
     today = datetime.today()
     month = month or today.month
     year = year or today.year
-    # Both collect_month (reads FINALIZE_EXPORT_PATH) and the dashboard write
+    # Both collect_month (reads EXCEL_PATH) and the dashboard write
     # below go through Excel COM, same as main.py's live order writes - and
     # that COM session doesn't tolerate concurrent access from another
     # process (automation.log has a history of OLE error 0x800ac472 /
@@ -468,7 +465,7 @@ def refresh_for_dates(iso_dates):
     """Regenerate the VAD_MM sheet for every month touched by iso_dates.
 
     Meant to be called right after workbench's 마감 (export) finishes
-    writing those dates into FINALIZE_EXPORT_PATH - one call covers however
+    writing those dates into EXCEL_PATH - one call covers however
     many dates/months were just closed out. Never raises: a dashboard
     refresh failing must not be mistaken for the 마감 export itself having
     failed, so every error is logged and swallowed, and callers get back
