@@ -864,6 +864,23 @@ def _read_serial_numbers_from_popup_once(session):
     return sn_list
 
 
+def _wait_popups_closed(session, timeout=5.0):
+    """Technical objects 팝업/종료확인 팝업(wnd[1], wnd[2])이 완전히 사라질 때까지
+    기다린다. 남아 있으면 닫기를 다시 시도한다 (2026-10-08: 닫기 직후 바로 다음
+    행을 잡다가 "Can not set focus to this object"로 행 2·3 수집이 실패한 사고 -
+    ZRE 67076181). 반환: True(깨끗함) / False(timeout 후에도 팝업 남음)."""
+    deadline = time.time() + timeout
+    while True:
+        try:
+            session.findById("wnd[1]")
+        except Exception:
+            return True
+        if time.time() >= deadline:
+            return False
+        _close_tech_obj_popup(session)
+        time.sleep(0.5)
+
+
 def collect_serial_numbers(session, items):
     """
     RETURN 아이템(Bunit 제외)의 S/N을 수집.
@@ -881,73 +898,80 @@ def collect_serial_numbers(session, items):
         row_i = item['table_row_i']
         scroll_top = item.get('table_scroll_top', 0)
         logger.info(f"  S/N 수집: [{item['arktx']}] (행 {row_i}, 스크롤 {scroll_top})")
-        try:
-            table = session.findById(ZRMA_ITEMS_TABLE_PATH)
+        for attempt in range(2):
+            # 이전 행의 팝업이 완전히 닫힌 뒤에만 다음 행을 잡는다 (2026-10-08)
+            if not _wait_popups_closed(session):
+                logger.warning("    이전 팝업이 닫히지 않은 채로 진행")
             try:
-                if table.VerticalScrollbar.Position != scroll_top:
-                    table.VerticalScrollbar.Position = scroll_top
-                    time.sleep(0.2)
-            except Exception as e:
-                logger.warning(f"    스크롤 복원 실패 (top={scroll_top}): {e}")
-            # 행 구조 탐색 (최초 1회만)
-            if idx == 0:
+                table = session.findById(ZRMA_ITEMS_TABLE_PATH)
                 try:
-                    row_obj = table.rows.elementAt(row_i)
-                    logger.info(f"    row type={row_obj.Type}  selected={row_obj.selected}")
-                    for ci in range(min(row_obj.Children.Count, 6)):
-                        cell = row_obj.Children.ElementAt(ci)
-                        txt = ''
-                        try:
-                            txt = cell.Text
-                        except Exception:
-                            pass
-                        logger.info(f"    row.Children[{ci}]: id={cell.Id}  type={cell.Type}  text='{txt}'")
+                    if table.VerticalScrollbar.Position != scroll_top:
+                        table.VerticalScrollbar.Position = scroll_top
+                        time.sleep(0.2)
                 except Exception as e:
-                    logger.info(f"    row 탐색 실패: {e}")
-            table.GetCell(row_i, 0).setFocus()
-            time.sleep(0.3)
-            try:
-                table.rows.elementAt(row_i).selected = True
-                logger.info(f"    행 {row_i} 선택 완료")
-            except Exception as e:
-                logger.warning(f"    행 선택 실패 (setFocus만 적용): {e}")
-
-            session.findById(EXTRAS_TECH_OBJ).select()
-            time.sleep(1.5)
-
-            # 팝업 확인
-            try:
-                popup = session.findById("wnd[1]")
-                logger.info(f"    팝업 제목: '{popup.Text}'")
-                # tbar 버튼 목록 로깅
+                    logger.warning(f"    스크롤 복원 실패 (top={scroll_top}): {e}")
+                # 행 구조 탐색 (최초 1회만)
+                if idx == 0:
+                    try:
+                        row_obj = table.rows.elementAt(row_i)
+                        logger.info(f"    row type={row_obj.Type}  selected={row_obj.selected}")
+                        for ci in range(min(row_obj.Children.Count, 6)):
+                            cell = row_obj.Children.ElementAt(ci)
+                            txt = ''
+                            try:
+                                txt = cell.Text
+                            except Exception:
+                                pass
+                            logger.info(f"    row.Children[{ci}]: id={cell.Id}  type={cell.Type}  text='{txt}'")
+                    except Exception as e:
+                        logger.info(f"    row 탐색 실패: {e}")
+                table.GetCell(row_i, 0).setFocus()
+                time.sleep(0.3)
                 try:
-                    tbar = session.findById("wnd[1]/tbar[0]")
-                    for bi in range(tbar.Children.Count):
-                        btn = tbar.Children.ElementAt(bi)
-                        tooltip = ''
-                        try:
-                            tooltip = btn.Tooltip
-                        except Exception:
-                            pass
-                        logger.info(f"    tbar[0] 버튼[{bi}]: id={btn.Id}  type={btn.Type}  tooltip='{tooltip}'")
+                    table.rows.elementAt(row_i).selected = True
+                    logger.info(f"    행 {row_i} 선택 완료")
                 except Exception as e:
-                    logger.info(f"    tbar[0] 없음: {e}")
-                if popup.Text == "Information":
-                    logger.info("    Information 팝업 → Enter로 닫기")
-                    popup.sendVKey(0)
-                    time.sleep(1.5)
-            except Exception:
-                logger.warning("    팝업(wnd[1]) 없음")
+                    logger.warning(f"    행 선택 실패 (setFocus만 적용): {e}")
 
-            sn_list = _read_serial_numbers_from_popup(session)
-            logger.info(f"    → S/N: {sn_list if sn_list else '없음(X)'}")
-            item['serial_numbers'] = sn_list if sn_list else ['X']
+                session.findById(EXTRAS_TECH_OBJ).select()
+                time.sleep(1.5)
 
-        except Exception as e:
-            logger.warning(f"  S/N 수집 실패 (행 {row_i}): {e}")
-            item['serial_numbers'] = ['X']
-        finally:
-            _close_tech_obj_popup(session)
+                # 팝업 확인
+                try:
+                    popup = session.findById("wnd[1]")
+                    logger.info(f"    팝업 제목: '{popup.Text}'")
+                    # tbar 버튼 목록 로깅
+                    try:
+                        tbar = session.findById("wnd[1]/tbar[0]")
+                        for bi in range(tbar.Children.Count):
+                            btn = tbar.Children.ElementAt(bi)
+                            tooltip = ''
+                            try:
+                                tooltip = btn.Tooltip
+                            except Exception:
+                                pass
+                            logger.info(f"    tbar[0] 버튼[{bi}]: id={btn.Id}  type={btn.Type}  tooltip='{tooltip}'")
+                    except Exception as e:
+                        logger.info(f"    tbar[0] 없음: {e}")
+                    if popup.Text == "Information":
+                        logger.info("    Information 팝업 → Enter로 닫기")
+                        popup.sendVKey(0)
+                        time.sleep(1.5)
+                except Exception:
+                    logger.warning("    팝업(wnd[1]) 없음")
+
+                sn_list = _read_serial_numbers_from_popup(session)
+                logger.info(f"    → S/N: {sn_list if sn_list else '없음(X)'}")
+                item['serial_numbers'] = sn_list if sn_list else ['X']
+                break
+
+            except Exception as e:
+                logger.warning(f"  S/N 수집 실패 (행 {row_i}, 시도 {attempt + 1}/2): {e}")
+                if attempt == 1:
+                    item['serial_numbers'] = ['X']
+            finally:
+                _close_tech_obj_popup(session)
+                _wait_popups_closed(session)
 
 
 def navigate_to_zrma_order(session, grid_idx):

@@ -158,8 +158,45 @@ def open_order(order_num):
     return True
 
 
+def open_serial(serial):
+    """새 SAP 세션에서 ZIH08을 열고 선택화면 Serial Number 첫 칸(txtSERNR-LOW)에
+    시리얼을 넣은 뒤 Execute(F8)까지 눌러 결과 화면을 사용자에게 보여준다
+    (조회 전용 - 데이터 변경 없음. 2026-10-08 실측 필드 ID)."""
+    serial = str(serial).strip()
+    if not serial:
+        logger.error("시리얼이 비어 있습니다.")
+        return False
+
+    app = get_scripting_engine()
+    conn = app.Children(0)
+    try:
+        new_session = _create_new_session(conn)
+    except RuntimeError as e:
+        logger.error(str(e))
+        return False
+    if new_session is None:
+        logger.error("새 세션이 시간 내에 나타나지 않음 (생성 실패 또는 지연)")
+        return False
+
+    time.sleep(1)
+    try:
+        new_session.findById("wnd[0]/tbar[0]/okcd").text = "/nZIH08"
+        new_session.findById("wnd[0]").sendVKey(0)
+        time.sleep(2)
+        new_session.findById("wnd[0]/usr/txtSERNR-LOW").text = serial
+        new_session.findById("wnd[0]/tbar[1]/btn[8]").press()
+        time.sleep(2)
+        logger.info(f"시리얼 {serial} ZIH08 조회 실행: {new_session.findById('wnd[0]').Text}")
+    except Exception as e:
+        logger.warning(f"시리얼 {serial} ZIH08 조회 실패 (세션 자체는 열림): {e}")
+        return False
+    return True
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 2 and sys.argv[1].lower() == "order":
+    if len(sys.argv) > 2 and sys.argv[1].lower() == "serial":
+        ok = open_serial(sys.argv[2])
+    elif len(sys.argv) > 2 and sys.argv[1].lower() == "order":
         ok = open_order(sys.argv[2])
     else:
         tcode_arg = sys.argv[1] if len(sys.argv) > 1 else None

@@ -338,6 +338,10 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.read_json()
                 self.send_json(sap_open_order(body.get("orderNo") or ""))
                 return
+            if parsed.path == "/api/sap/open_serial":
+                body = self.read_json()
+                self.send_json(sap_open_serial(body.get("serial") or ""))
+                return
             if parsed.path == "/api/portal/login_manual":
                 self.send_json(portal_login_manual())
                 return

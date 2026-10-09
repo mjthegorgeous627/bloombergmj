@@ -380,6 +380,7 @@ def _run_vl10g(session, processed):
 
     if result['pushed_to_vl06o']:
         logger.info(f"VL06O로 이관된 오더: {result['pushed_to_vl06o']}")
+        _wait_obd_after_push(result['pushed_to_vl06o'])
 
     # ZRE 회수 오더 처리 (VL10G ZS 해제 + S/N 수집 완료)
     for order_num, rows in result['zre_orders'].items():
@@ -393,6 +394,32 @@ def _run_vl10g(session, processed):
                     logger.info(f"ZRE 오더 {order_num} workbench 반영 완료")
                 except Exception as e:
                     logger.error(f"ZRE 오더 {order_num} 기록 실패: {e}")
+
+
+def _wait_obd_after_push(pushed):
+    """VL10G에서 Background 이관한 오더가 VL06O에 뜰 때까지 새로고침하며 기다렸다가
+    OBD를 workbench에 백필한다 (2026-10-08 - ZRX 67106923 Serial 등록 실패 대응).
+    SAP 백그라운드 job이 늦으면 최대 ~40초 후 포기하고, 이후는 정규 사이클 백필이 이어받는다."""
+    pending = set(str(o) for o in pushed)
+    try:
+        sess0 = get_sap_session(0)
+    except Exception as e:
+        logger.warning(f"이관 후 OBD 확인: 세션0 연결 실패: {e}")
+        return
+    for attempt in range(2):
+        time.sleep(20)
+        try:
+            navigate_to_vl06o_list(sess0)
+            obd_map = _get_current_vl06o_obd_map()
+        except Exception as e:
+            logger.warning(f"이관 후 VL06O 새로고침 실패 (시도 {attempt + 1}/2): {e}")
+            continue
+        _backfill_blank_obd(obd_map)
+        pending = {o for o in pending if not obd_map.get(o)}
+        if not pending:
+            logger.info("이관 오더 OBD 백필 완료")
+            return
+    logger.warning(f"이관 후 OBD가 아직 안 뜬 오더: {sorted(pending)} (다음 사이클 백필이 이어받음)")
 
 
 def _run_zrma(session, processed, variant, date_mode, obd_map=None):

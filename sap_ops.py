@@ -764,6 +764,20 @@ def sap_open_order(order_no):
     return {"started": True, "pid": proc.pid}
 
 
+def sap_open_serial(serial):
+    """"시리얼 조회" - 새 SAP 세션에서 ZIH08을 열어 시리얼을 넣고 Execute까지
+    실행해 결과 화면을 보여준다(open_session.py open_serial()). 조회 전용이라
+    자동루프 중에도 안전 - 세션 0~3은 건드리지 않음."""
+    serial = (serial or "").strip()
+    if not serial:
+        return {"started": False, "message": "시리얼을 입력하세요."}
+    proc = subprocess.Popen(
+        [sys.executable, "open_session.py", "serial", serial], cwd=str(BASE_DIR),
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    return {"started": True, "pid": proc.pid}
+
+
 def _run_hidden_with_toast(args, label, cwd=None):
     """2026-08-25: replaces the CREATE_NEW_CONSOLE pattern several one-shot
     scripts used purely so their own print()'d success/failure text was

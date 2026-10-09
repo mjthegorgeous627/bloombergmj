@@ -31,6 +31,12 @@ COL_DOC_TYPE    = "AUART"    # Sales Document Type
 COL_DELIV_BLOCK = "LIFSP"    # Delivery Block (ZZ/ZS 여부) — discover 확인
 COL_VBELN       = "VBELN"    # 배송 문서번호
 
+# 2026-10-08: VL10G에서 수집된 오더는 아직 배송 문서(OBD)가 없어 Delivery#가
+# 비어 있고, 그 상태로는 Portal Serial 등록이 실패한다(ZRX 67106923). 수집 직후
+# 이 타입 오더는 Background(이관)을 눌러 VL06O로 넘기고, main.py가 VL06O를
+# 새로고침해 OBD를 workbench에 채운다. ZRE(회수)는 OBD가 필요 없어 제외.
+AUTO_PUSH_DOC_TYPES = ('ZRX',)
+
 
 def _end_of_next_month_str():
     today = date.today()
@@ -524,31 +530,49 @@ def process_zre_with_block_release(session, grid_idx, orig_doc, order_type, name
         return False, str(e)
 
 
-def push_to_vl06o(session, grid_idx):
-    """
-    VL10G 목록에서 해당 행 선택 → Background 버튼 클릭 → VL06O로 이관.
-    반환: True(성공) / False(실패)
+def _find_grid_idx(session, orig_doc):
+    try:
+        grid = session.findById(VL10G_GRID_PATH)
+        for i in range(grid.RowCount):
+            if grid.GetCellValue(i, COL_ORIG_DOC).strip() == str(orig_doc):
+                return i
+    except Exception:
+        pass
+    return None
 
-    2026-08-28 사용자 지시로 process_vl10g()가 이 함수를 호출하지 않는다 -
-    이관(배송 문서 생성)은 앞으로도 사용자가 SAP에서 직접 처리하고, 자동화는
-    건드리지 않는다(오더 수집 자체는 run_manual_order()로 이관과 무관하게
-    이미 처리됨 - process_vl10g() 참고). 필요해지면 다시 연결할 수 있게
-    함수는 남겨둠.
+
+def push_to_vl06o(session, orig_doc):
+    """
+    VL10G 목록에서 orig_doc 행을 찾아 선택 → Background 버튼 → VL06O로 이관.
+    (행 번호는 수집 중 목록이 바뀔 수 있어 매번 오더번호로 다시 찾는다.)
+    반환: True(성공) / False(실패)
     """
     try:
         grid = session.findById(VL10G_GRID_PATH)
-        # selectedRows로 행 선택 후 Background 버튼
+        grid_idx = None
+        for i in range(grid.RowCount):
+            try:
+                if grid.GetCellValue(i, COL_ORIG_DOC).strip() == str(orig_doc):
+                    grid_idx = i
+                    break
+            except Exception:
+                continue
+        if grid_idx is None:
+            logger.warning(f"VL06O 이관: VL10G에서 오더 {orig_doc} 행을 못 찾음(이미 이관됐을 수 있음)")
+            return False
+
         grid.selectedRows = str(grid_idx)
         time.sleep(0.3)
 
         # Background 버튼 클릭 (tbar[1]/btn[19] = Shift+F7)
         session.findById("wnd[0]/tbar[1]/btn[19]").press()
         time.sleep(2)
-        logger.info("Background 버튼 클릭 (tbar[1]/btn[19])")
+        _close_common_popup(session)
+        logger.info(f"오더 {orig_doc}: Background 버튼 클릭 (행 {grid_idx}) → status: {_read_status_bar(session)}")
         return True
 
     except Exception as e:
-        logger.error(f"VL06O 이관 실패: {e}")
+        logger.error(f"VL06O 이관 실패 ({orig_doc}): {e}")
         return False
 
 
@@ -568,7 +592,7 @@ def process_vl10g(session, processed):
 
     반환: {
         'blocked_excel_rows': {'7***': [excel_row]},  # 수집 실패 시 에러 placeholder
-        'pushed_to_vl06o': [],                        # 더 이상 안 씀 (항상 빈 리스트)
+        'pushed_to_vl06o': [],                        # Background 이관한 오더(AUTO_PUSH_DOC_TYPES)
         'zre_orders': {'6***': [excel_row, ...]}       # ZRE 회수 오더
     }
     """
@@ -659,5 +683,29 @@ def process_vl10g(session, processed):
             excel_rows = build_blocked_order_row(orig_doc, doc_type, deliv_block, name1, "VA02/VA03 직접 수집 실패")
             result['blocked_excel_rows'][orig_doc] = excel_rows
             logger.warning(f"오더 {orig_doc} 직접 수집 실패 → Block 정보만 Excel 기록")
+        elif doc_type in AUTO_PUSH_DOC_TYPES:
+            # 수집 성공 → (블록이 있으면 해제 시도) → VL06O로 이관해 OBD 생성.
+            # 이후 main._run_vl10g가 VL06O 새로고침+OBD 백필.
+            if deliv_block:
+                # 2026-10-08: ZS/ZZ는 오더 안 Delivery Block 드롭다운을 맨 아래 공백으로
+                # 바꾸고 저장하면 풀린다. 오더에 못 들어가거나 해제 후에도 안 풀리면
+                # BOS/BCS 팀이 일부러 건 블록일 수 있으므로 건드리지 않고 둔다.
+                idx = _find_grid_idx(session, orig_doc)
+                ok, err = (False, "VL10G에서 행 못 찾음") if idx is None else release_delivery_block(session, idx, orig_doc)
+                if not ok:
+                    logger.warning(f"오더 {orig_doc}: 블록({deliv_block}) 해제 실패({err}) → 수집만 하고 이관 생략 (팀에서 건 블록일 수 있음)")
+                    refresh_vl10g(session)
+                    continue
+            try:
+                refresh_vl10g(session)
+            except Exception as exc:
+                logger.warning(f"이관 전 VL10G 새로고침 실패: {exc}")
+            if deliv_block:
+                cur = next((r for r in get_all_rows_from_vl10g(session) if r['orig_doc'] == orig_doc), None)
+                if cur and cur['deliv_block']:
+                    logger.warning(f"오더 {orig_doc}: 해제 저장 후에도 블록({cur['deliv_block']}) 남음 → 이관 생략")
+                    continue
+            if push_to_vl06o(session, orig_doc):
+                result['pushed_to_vl06o'].append(orig_doc)
 
     return result
