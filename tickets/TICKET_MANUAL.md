@@ -189,6 +189,8 @@ SDSK 1334533923 | Add-On Non-Billable SID(s)
 - 화면에서 주황색이던 5건과 `A`,`E` 5건이 일치 → **진행 중 = St가 `A` 또는 `E`**, 나머지(`R` 해결, `W` 철회, `>R`/`<W`는 R/W 앞의 표시 문자)는 마감 ⚠️ (Legend로 최종 확인 필요)
 - **Rep Name이 MINJUNG SUH이면 Rep**(내 담당), 아니면 Subscriber.
 
+> ⚠️ **SUB 내보내기에는 티켓번호(`SDSK 숫자`) 열이 없다** (2026-10-09 확인). 열이 Dept, Opened, St, Summary, Rep Name 뿐이라, 티켓번호는 **Summary(+Opened 날짜)로 수신함/티켓 화면과 맞춰서** 찾아야 한다. 또 **내가 글을 쓴 티켓이 REP/SUB 목록 어디에도 없을 수 있다**(예: `SDSK 1334533923`은 내 글이 있는데 SUB 목록에 해당 행이 없었음). 그래서 수신함이 목록과 별개로 필요한 2번째 소스이다.
+
 ### 6-2. REP 계열 (`rep 목록.xlsx`) — ⚠️ 문제
 - 이번에 받은 파일은 **MYDB(내 대시보드)** 내보내기였다. 열: Function Name, Dept, Ticket ID, Open Date, Class, Summary, Problem Name, Customer, Region, User Name, Last Updated, Seq (98건)
 - **상태 열이 없고, Rep 열도 없다.** (`User Name`은 요청한 직원이지 Rep가 아님) → 진행/마감 구분 불가.
@@ -284,6 +286,7 @@ SDSK 1334533923 | Add-On Non-Billable SID(s) | Rep Him-Chan Park
 | 날짜 | 내용 |
 |---|---|
 | 2026-10-09 | 최초 작성. 사용자 설명 전체 정리, 엑셀 분석(6장), 알림창 조사 스크립트 추가 |
+| 2026-10-09 | SUB 내보내기에 티켓번호 열 없음 / 목록에 없는 티켓 존재 기록(6-1), 티켓 구역 시안 아티팩트 제작 |
 | 2026-10-09 | 5-4 표기 규칙(`SDSK 숫자`, 짧은 줄바꿈 상황), 5-5 본문 스크리닝 규칙 추가 |
 | 2026-10-09 | 알림창=`BLPMsgWClass` 별도 창 확인, 키 입력/티켓 이동/AI Summary 방식 검증, 알림 기준 안 읽은 4건 시험 점검 완료(7-3), `term_ops.py` 추가 |
 
