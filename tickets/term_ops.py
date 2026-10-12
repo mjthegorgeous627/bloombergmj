@@ -77,6 +77,56 @@ def vk_type(s):
         if sh: win32api.keybd_event(0x10, 0, 2, 0)
         time.sleep(0.04)
 
+def _exe_name(hwnd):
+    import os, win32process, win32api
+    try:
+        pid = win32process.GetWindowThreadProcessId(hwnd)[1]
+        ph = win32api.OpenProcess(0x1000, False, pid)
+        buf = ctypes.create_unicode_buffer(520); sz = ctypes.c_ulong(520)
+        ctypes.windll.kernel32.QueryFullProcessImageNameW(int(ph), 0, buf, ctypes.byref(sz))
+        return os.path.basename(buf.value).lower()
+    except Exception:
+        return "?"
+
+def ensure_terminal():
+    """Bloomberg 터미널 창을 복원해 맨 앞으로 가져오고, 실제로 앞에 왔는지 확인한다. 실패하면 예외.
+    (2026-10-12 사고: 터미널이 최소화되고 SAP가 앞에 있는 채로 click/타이핑이 실행돼 입력이 SAP로 갈 뻔함.
+    모든 터미널 조작은 이 함수가 성공한 뒤에만 한다.)"""
+    import win32gui
+    cands = []
+    def f(h, _):
+        if win32gui.IsWindowVisible(h) and win32gui.GetClassName(h) == "wdmm-Win32Window" and _exe_name(h) == "bplus64.exe":
+            title = win32gui.GetWindowText(h)
+            if title and not title.startswith(("IB -", "Launchpad")):
+                cands.append(h)
+    win32gui.EnumWindows(f, None)
+    if not cands:
+        raise RuntimeError("Bloomberg 터미널 창을 찾지 못했습니다.")
+    hwnd = cands[0]
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE); time.sleep(0.8)
+    # SetForegroundWindow 제한 우회: Alt 키를 한 번 눌러 준다 (focus_guard.py와 같은 방식)
+    # 사용자가 다른 창(메신저 등)을 쓰는 중이면 잠깐 뺏길 수 있어 몇 번 재시도한다. 끝내 못 가져오면 입력 없이 중단.
+    for _ in range(4):
+        if win32gui.GetForegroundWindow() == hwnd:
+            break
+        win32api.keybd_event(0x12, 0, 0, 0); win32api.keybd_event(0x12, 0, 2, 0)
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+        time.sleep(1.0)
+    if win32gui.GetForegroundWindow() != hwnd:
+        raise RuntimeError("터미널을 맨 앞으로 가져오지 못했습니다(다른 창이 앞에 있음). 입력하지 않고 중단합니다.")
+    l, t_, r, b = win32gui.GetWindowRect(hwnd)
+    if not (r - l >= 1800 and b - t_ >= 1000 and -50 <= l <= 50):
+        raise RuntimeError(f"터미널 창 위치/크기가 예상(왼쪽 모니터 전체화면)과 다릅니다: {(l, t_, r, b)}")
+    return hwnd
+
+def grab_box(box):
+    return ImageGrab.grab(all_screens=True).crop(box).convert("RGB")
+
 def goto(cmd, wait=5):
+    ensure_terminal()
     click(360, 85); time.sleep(0.3)
     vk_type(cmd); time.sleep(0.6); enter(); time.sleep(wait)
