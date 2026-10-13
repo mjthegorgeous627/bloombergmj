@@ -97,12 +97,16 @@ def ensure_terminal():
     def f(h, _):
         if win32gui.IsWindowVisible(h) and win32gui.GetClassName(h) == "wdmm-Win32Window" and _exe_name(h) == "bplus64.exe":
             title = win32gui.GetWindowText(h)
-            if title and not title.startswith(("IB -", "Launchpad")):
+            if title and title != "wdmm-Win32Window" and not title.startswith(("IB -", "Launchpad")):
                 cands.append(h)
     win32gui.EnumWindows(f, None)
     if not cands:
         raise RuntimeError("Bloomberg 터미널 창을 찾지 못했습니다.")
-    hwnd = cands[0]
+    # 터미널 본체는 가장 큰 창(작은 보조 창과 구분). 최소화(-32000)된 창은 크기를 못 재므로 마지막 순위.
+    def area(h):
+        l, t_, r, b = win32gui.GetWindowRect(h)
+        return (r - l) * (b - t_) if l > -30000 else 0
+    hwnd = max(cands, key=area)
     if win32gui.IsIconic(hwnd):
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE); time.sleep(0.8)
     # SetForegroundWindow 제한 우회: Alt 키를 한 번 눌러 준다 (focus_guard.py와 같은 방식)
@@ -123,10 +127,35 @@ def ensure_terminal():
         raise RuntimeError(f"터미널 창 위치/크기가 예상(왼쪽 모니터 전체화면)과 다릅니다: {(l, t_, r, b)}")
     return hwnd
 
+def ensure_english_ime(hwnd):
+    """입력기가 한글 모드면 영문으로 바꾼다. (2026-10-13 사고: 한글 모드에서 vk_type('SDSK 번호')가
+    한글 자모로 입력돼 터미널 검색창에 '간포생명보험…' 같은 자동완성이 뜸 -> 티켓 대신 엉뚱한 화면.)
+    IME 변환 모드의 NATIVE 비트(1)가 켜져 있으면 한글. 한/영 키(VK_HANGUL 0x15)로 토글 후 재확인."""
+    try:
+        ime = ctypes.windll.imm32.ImmGetDefaultIMEWnd(hwnd)
+        if not ime:
+            return
+        IMC_GETCONVERSIONMODE = 0x0001
+        def native():
+            return bool(U.SendMessageW(ime, 0x0283, IMC_GETCONVERSIONMODE, 0) & 1)   # WM_IME_CONTROL
+        # 2026-10-13 실측: 한/영 키(VK_HANGUL) 토글은 변환모드 9->1로만 바뀌고 영문이 안 됨(작업표시줄 '가' 그대로).
+        # IMC_SETCONVERSIONMODE=0 으로 직접 설정하면 즉시 영문('A')이 된다.
+        for _ in range(2):
+            if not native():
+                return
+            U.SendMessageW(ime, 0x0283, 0x0002, 0)       # IMC_SETCONVERSIONMODE = 0
+            time.sleep(0.4)
+        if native():
+            raise RuntimeError("입력기를 영문으로 바꾸지 못했습니다. 입력하지 않고 중단합니다.")
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+
 def grab_box(box):
     return ImageGrab.grab(all_screens=True).crop(box).convert("RGB")
 
 def goto(cmd, wait=5):
-    ensure_terminal()
+    ensure_english_ime(ensure_terminal())
     click(360, 85); time.sleep(0.3)
     vk_type(cmd); time.sleep(0.6); enter(); time.sleep(wait)
