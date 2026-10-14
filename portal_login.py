@@ -357,6 +357,134 @@ def autofill_login_if_needed():
     return False
 
 
+def click_sso_next(page, timeout_seconds=30):
+    """On the Bloomberg SSO form: make sure id/password are present (Chrome
+    autofill, else credentials.py) and click Next exactly once, staying
+    connected until the page leaves the form (disconnecting right after the
+    click dropped the submit - 2026-10-14 live). A B-Unit prompt (needed only
+    ~every 14 days) is left to the user."""
+    try:
+        from credentials import PORTAL_PASSWORD, PORTAL_USER
+    except ImportError:
+        PORTAL_USER = PORTAL_PASSWORD = ""
+    if "startSSO.ping?PartnerSpId" not in (page.url or ""):
+        return True
+    try:
+        page.wait_for_selector("input[type='password']", timeout=timeout_seconds * 1000)
+    except Exception:
+        pass
+    time.sleep(1.5)  # let Chrome autofill land
+    user_field = page.locator("input[name='pf.username'], input[name='username'], input[type='email'], input[type='text']").first
+    pass_field = page.locator("input[type='password']").first
+    for field, value in ((user_field, PORTAL_USER), (pass_field, PORTAL_PASSWORD)):
+        try:
+            if field.count() and value and not (field.input_value(timeout=1000) or "").strip():
+                field.fill(value, timeout=3000)
+        except Exception:
+            pass
+    if _click_first(page, ["button:has-text('Next')", "input[type='submit'][value*='Next']", "input[type='submit']"], timeout=3000):
+        print("Next 버튼을 눌렀습니다.", flush=True)
+    else:
+        page.keyboard.press("Enter")
+        print("Next 버튼을 못 찾아 Enter를 보냈습니다.", flush=True)
+    try:
+        page.wait_for_url(lambda u: "startSSO.ping?PartnerSpId" not in u, timeout=15000)
+    except Exception:
+        pass
+    time.sleep(2)
+    return "startSSO.ping?PartnerSpId" not in (page.url or "")
+
+
+PROTECTED_URL = "https://bsp.btogo.com/supplier/warehouse/deliverydue/index"
+
+
+def _is_logged_out(url):
+    url = url or ""
+    return "/supplier/login" in url or "bsso.blpprofessional.com" in url
+
+
+def _cdp_connect(pw, open_if_needed=True):
+    try:
+        return pw.chromium.connect_over_cdp("http://localhost:9222", timeout=5000)
+    except Exception:
+        if not open_if_needed:
+            return None
+    open_portal_login()
+    deadline = time.time() + 25
+    while time.time() < deadline:
+        time.sleep(1)
+        try:
+            return pw.chromium.connect_over_cdp("http://localhost:9222", timeout=5000)
+        except Exception:
+            pass
+    return None
+
+
+def preflight_login():
+    """Called first by every Portal flow (Serial/QR, POD, spare shipping):
+    if the automation Chrome is logged out, log in (SSO link + Next) BEFORE
+    the real work starts, instead of failing mid-flow on an expired session.
+    Opens Chrome if it isn't running. Uses its own temporary tab so no
+    in-progress tab is disturbed. Returns True when logged in; False when it
+    could not (e.g. B-Unit approval pending) - callers go on and let their own
+    session checks report the specific error."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return False
+    with portal_browser_lock("login_preflight"):
+        pw = sync_playwright().start()
+        try:
+            browser = _cdp_connect(pw)
+            if browser is None or not browser.contexts:
+                print("Portal Chrome에 연결하지 못했습니다.", flush=True)
+                return False
+            context = browser.contexts[0]
+            had_other_tabs = bool(context.pages)
+            page = context.new_page()
+            try:
+                try:
+                    page.goto(PROTECTED_URL, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(1500)
+                except Exception:
+                    pass
+                if not _is_logged_out(page.url):
+                    return True
+                print("Portal 로그인이 풀려 있어 먼저 로그인합니다.", flush=True)
+                try:
+                    page.goto(PORTAL_SSO_URL, wait_until="domcontentloaded", timeout=30000)
+                except Exception:
+                    pass
+                click_sso_next(page)
+                # B-Unit prompt: never click/retry anything - just wait
+                # (passively, up to 3 min) for the user to approve it.
+                try:
+                    if "Authenticate to Continue" in page.locator("body").inner_text(timeout=3000):
+                        print("B-Unit 인증 화면입니다 - 직접 승인해 주세요 (최대 3분 대기).", flush=True)
+                        page.wait_for_url(lambda u: "bsp.btogo.com" in u, timeout=180000)
+                except Exception:
+                    pass
+                try:
+                    page.goto(PROTECTED_URL, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(1500)
+                except Exception:
+                    pass
+                ok = not _is_logged_out(page.url)
+                print("Portal 로그인 완료" if ok else "Portal 로그인 실패 - 인증(B-Unit) 대기 중일 수 있습니다.", flush=True)
+                return ok
+            finally:
+                if had_other_tabs:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+        finally:
+            try:
+                pw.stop()
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     if "--open-only" in sys.argv:
         # Just opens the automation Chrome profile (right debug port, right
@@ -369,7 +497,32 @@ if __name__ == "__main__":
         # works exactly as well as the automated one once it lands on the
         # real logged-in portal page.
         open_portal_login()
-        print("Chrome을 열었습니다 (자동화 프로필). 직접 로그인하세요 - Next 자동클릭/BUIT 대기는 하지 않습니다.")
+        # 2026-10-14: user's manual flow was just "open SSO link, click Next"
+        # (Chrome already has the id/password saved). Do exactly that: once
+        # the SSO page is up, click Next a single time (filling credentials.py
+        # values only if a field is empty - Chrome hides autofilled passwords
+        # from scripts until a user gesture). Never loops/retries; BUIT
+        # approval after Next is still done by the user.
+        try:
+            with portal_browser_lock("login_open_only"):
+                pw, browser, page = _connect_page(timeout_seconds=20)
+                if page is None:
+                    print("Chrome을 열었지만 Next 자동클릭은 못 했습니다. 직접 Next를 눌러주세요.")
+                else:
+                    try:
+                        click_sso_next(page)
+                    finally:
+                        try:
+                            browser.close()
+                        except Exception:
+                            pass
+                        try:
+                            pw.stop()
+                        except Exception:
+                            pass
+        except Exception as exc:
+            print(f"Chrome을 열었지만 Next 자동클릭 실패: {exc}. 직접 Next를 눌러주세요.")
+        print("Chrome을 열었습니다 (자동화 프로필). BUIT 인증이 뜨면 직접 승인하세요.")
         sys.exit(0)
     ok = ensure_portal_login()
     if not ok:

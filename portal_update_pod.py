@@ -444,6 +444,13 @@ def main():
         ],
     )
     try:
+        if not args.preview:
+            # 2026-10-14: log in first if logged out (SSO link + Next).
+            try:
+                from portal_login import preflight_login
+                preflight_login()
+            except Exception as exc:
+                logger.warning("로그인 사전확인 실패(계속 진행): %s", exc)
         items_override = None
         if args.items_json:
             try:

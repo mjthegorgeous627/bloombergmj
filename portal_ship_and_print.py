@@ -337,6 +337,14 @@ def main():
     # so an actually-expired session still gets caught, just ~3.5s sooner
     # in the pipeline instead of before it even starts.
 
+    # 2026-10-14: log in FIRST if the automation Chrome is logged out (SSO
+    # link + Next), so a logged-out session no longer fails mid-flow.
+    try:
+        from portal_login import preflight_login
+        preflight_login()
+    except Exception as exc:
+        logger.warning("로그인 사전확인 실패(계속 진행): %s", exc)
+
     serial_args = [
         "portal_register_serial.py",
         "--delivery", resolved["delivery"],
