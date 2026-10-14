@@ -48,6 +48,7 @@ STUB = r'''<script>
     if(url==='/api/memos/delete'){memos=memos.filter(function(m){return m.id!==body.id});return ok({});}
     if(url.indexOf('/api/history/search')===0){var q=decodeURIComponent(url.split('q=')[1]||'').toLowerCase().split(/\s+/).filter(Boolean);var hit=HIST.filter(function(h){var t=(h.kind+' '+h.orderNo+' '+h.cells.join(' ')).toLowerCase();return q.every(function(w){return t.indexOf(w)>=0})});return ok({results:hit.slice(0,200),total:hit.length});}
     if(url.indexOf('/api/history/group')===0){var u=new URLSearchParams(url.split('?')[1]);var sid=+u.get('sheet_id'),gn=+u.get('group_no');var rs=HIST.filter(function(h){return h.sheetId===sid&&h.groupNo===gn});return ok(rs.length?{sheetDate:rs[0].sheetDate,sheetName:rs[0].sheetName,sourceFile:rs[0].sourceFile,rows:rs}:{error:'not found'});}
+    if(url.indexOf('/api/quick/suggest')===0){var cq=decodeURIComponent(url.split('company=')[1]||'').toLowerCase();var seenq={},outq=[];HIST.forEach(function(h){var a=(h.cells[6]||'');if(outq.length>=3||a.toLowerCase().indexOf(cq)<0)return;var ls=a.split('\n').filter(function(x){return /[가-힣]/.test(x)&&/\d/.test(x)&&x.indexOf('cust#')<0&&x.indexOf('연락')<0});if(!ls.length)return;var t=ls.join(' ');if(seenq[t])return;seenq[t]=1;outq.push({text:t,date:h.sheetDate})});return ok({suggestions:outq});}
     if(url==='/api/pages') return ok({pages:PAGES});
     if(url==='/api/pages/add'){var np={id:pid++,title:body.title||'새 메모장',body:''};PAGES.push(np);return ok({added:true,id:np.id,title:np.title});}
     if(url==='/api/pages/edit'){PAGES.forEach(function(p){if(p.id===body.id)p[body.field]=body.value});return ok({updated:true});}
@@ -56,13 +57,16 @@ STUB = r'''<script>
     return ok({});
   };
   window.__PREVIEW__=true;
+  window.__QUICK_LOGO__='__LOGO__';
 })();
 </script>'''
 
 # artifact wants no <html>/<head>/<body> wrapper: keep <style> blocks + body content
 style = ''.join(re.findall(r'<style>.*?</style>', page, re.S))
 body = re.search(r'<body[^>]*>(.*)</body>', page, re.S).group(1)
-STUB = STUB.replace('__HIST__', HIST_DATA).replace('__PAGES__', PAGES_DATA)
+import base64
+LOGO = 'data:image/png;base64,' + base64.b64encode(open(r'C:\Users\bloomberg\Documents\MJSuh\mjbg\sap_automation\assets\bloomberg_logo.png','rb').read()).decode()
+STUB = STUB.replace('__LOGO__', LOGO).replace('__HIST__', HIST_DATA).replace('__PAGES__', PAGES_DATA)
 out = '<title>Workbench 추가기능 미리보기</title>\n' + style + '\n<style>body{background:#f1f4f9}</style>\n' + STUB + '\n' + body
 open(os.path.join(HERE, 'preview_A.html'), 'w', encoding='utf-8').write(out)
 js = re.findall(r'<script>(.*?)</script>', out, re.S)

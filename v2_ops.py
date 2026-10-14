@@ -124,3 +124,43 @@ def open_ticket(code):
         cwd=str(BASE_DIR), creationflags=subprocess.CREATE_NO_WINDOW,
     )
     return {"started": True, "pid": proc.pid}
+
+
+# ---------------- 퀵 기사님 안내문 (Word) ----------------
+LOGO_PATH = BASE_DIR / "assets" / "bloomberg_logo.png"
+
+
+def quick_logo_bytes():
+    return LOGO_PATH.read_bytes()
+
+
+def _has_hangul(s):
+    return any("\uac00" <= ch <= "\ud7a3" for ch in s)
+
+
+def quick_suggest(company_en):
+    """과거 이력(history.db)에서 같은 회사의 한글 주소 줄을 찾아 후보로 돌려준다(최대 3개).
+    회사명 한글 표기는 이력에 없는 경우가 많아 후보에 넣지 않는다 - 팝업에서 직접 입력."""
+    import history_search
+    company_en = " ".join(str(company_en or "").split())
+    if len(company_en) < 4:
+        return {"suggestions": []}
+    res = history_search.search(company_en)
+    rows = res["results"] if isinstance(res, dict) else res
+    out, seen = [], set()
+    for r in rows:
+        cells = r.get("cells") or []
+        addr = cells[6] if len(cells) > 6 else ""
+        lines = [ln.strip() for ln in str(addr).splitlines() if _has_hangul(ln) and "cust#" not in ln]
+        # '도착후 연락' 같은 메모성 줄은 주소가 아니라서 제외(도로명/동/층 숫자가 있는 줄만)
+        lines = [ln for ln in lines if any(ch.isdigit() for ch in ln) and "연락" not in ln]
+        if not lines:
+            continue
+        text = " ".join(lines)
+        if text in seen:
+            continue
+        seen.add(text)
+        out.append({"text": text, "date": r.get("sheetDate") or ""})
+        if len(out) >= 3:
+            break
+    return {"suggestions": out}

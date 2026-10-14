@@ -90,9 +90,9 @@ wr('dashboard.html', s)
 
 # ---- style.css / 09 ----
 s = rd('dashboard/style.css')
-s += open(os.path.join(HERE, 'A_extra.css'), encoding='utf-8').read()
+s += open(os.path.join(HERE, 'A_extra.css'), encoding='utf-8').read() + open(os.path.join(HERE, 'quick.css'), encoding='utf-8').read()
 wr('dashboard/style.css', s)
-shutil.copy(os.path.join(HERE, 'A_09_side_panel.js'), os.path.join(DST, 'dashboard', '09_side_panel.js'))
+wr('dashboard/09_side_panel.js', open(os.path.join(HERE, 'A_09_side_panel.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_quick.js'), encoding='utf-8').read())
 # 실제 서버용 사본: sap_automation\templates_v2 (PREVIEW_ONLY 환경에서는 건너뜀)
 V2 = os.environ.get('V2_DIR')
 if V2:

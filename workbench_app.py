@@ -137,6 +137,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(payload)
                 return
+            if parsed.path == "/api/quick/logo":
+                payload = v2_ops.quick_logo_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if parsed.path == "/api/quick/suggest":
+                qs = parse_qs(parsed.query)
+                self.send_json(v2_ops.quick_suggest(qs.get("company", [""])[0]))
+                return
             if parsed.path == "/api/memos":
                 self.send_json({"memos": v2_ops.list_quick_notes()})
                 return

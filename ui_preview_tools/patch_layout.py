@@ -43,6 +43,7 @@ HIDDEN = '''<div class="controls" id="hiddenCtl" style="display:none">
   <span class="ff-act">''' + B('processDone()') + B('processPickupReady()', 'Ready') + B('processCancel()') + B('processReset()') + B('processBilled()') + '''</span>
   <span class="ff-hist"><input id="histQ" type="search" placeholder="이력 검색" autocomplete="off" spellcheck="false" title="오더번호 / 시리얼 / 고객 등으로 예전 배송 이력 조회"></span>
   <span class="ff-spacer"></span>
+  <button type="button" class="ff-ico ff-quick" onclick="openQuickPrint()" title="퀵 기사님 안내문 인쇄 - 체크한 행을 퀵으로 보낼 때">퀵</button>
   <button type="button" class="ff-ico" onclick="undoLastAction()" title="실행취소 (Ctrl+Z) - 삭제/날짜이동/완료처리를 최근 20건까지 되돌림">↶</button>
   <button type="button" class="ff-ico" onclick="openTrash()" title="삭제된 항목 보기 (휴지통) - 7일 안이면 복구 가능">🗑</button>
 </div>
@@ -79,6 +80,7 @@ SIDE_HTML = '''<aside id="sideCol" class="side-col">
     <div class="side-sec tools">
       <h4>Excel</h4>
       <div class="srow">''' + B('finalizeChecked()') + B('printChecked()') + '''</div>
+      <div class="srow"><button type="button" class="btn block" onclick="openQuickPrint()" title="체크한 행으로 퀵 기사님께 드릴 안내문(A4)을 미리보고 인쇄합니다">퀵 기사님 안내문 인쇄</button></div>
       <details class="side-det"><summary>월초</summary>
         <div class="srow">''' + B('runQuickSettlement()') + '''</div>
       </details>
