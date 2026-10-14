@@ -28,6 +28,7 @@ from sap_ops import _sap_loop_watchdog_thread
 from portal_ops import *
 from monthly_tasks import run_quick_settlement
 import history_search
+import v2_ops
 def render_notes_page():
     """2026-08-31 사용자 요청: 오더/날짜와 무관한 잡메모(링크, 전화번호, 계정정보
     등)를 관리할 곳이 없어서 신설. 처음엔 항목별 카드+카테고리 UI로 만들었는데,
@@ -75,6 +76,22 @@ NOTES_PAGE_TEMPLATE = (TEMPLATES_DIR / "notes.html").read_text(encoding="utf-8")
 
 import dashboard_assets
 
+# ver.2 화면(2026-10-14): 같은 서버·같은 DB에서 /v2 주소로만 제공. templates_v2/ 는 요청마다 새로
+# 조립하므로(개발 중 재시작 없이 반영) 캐시하지 않는다. v1(/)은 아래 PAGE_TEMPLATE 그대로.
+TEMPLATES_V2_DIR = Path(__file__).resolve().parent / "templates_v2"
+
+
+def render_dashboard_v2_page():
+    page = dashboard_assets.assemble("dashboard.html", TEMPLATES_V2_DIR)
+    return (
+        page
+        .replace("__BOARD_DATA__", json.dumps(board_data(), ensure_ascii=False))
+        .replace("__CUSTOM_TYPES__", json.dumps(list_custom_types(), ensure_ascii=False))
+        .replace("__NONWORKING_DAYS__", json.dumps(nonworking_days_payload(), ensure_ascii=False))
+        .replace("__DELETED_ITEM_RETENTION_DAYS__", str(DELETED_ITEM_RETENTION_DAYS))
+    )
+
+
 PAGE_TEMPLATE = dashboard_assets.assemble("dashboard.html", TEMPLATES_DIR)  # CSS/JS 조각을 끼워 넣은 완성본 (dashboard_assets.py 참고)
 
 
@@ -110,6 +127,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
+                return
+            if parsed.path == "/v2":
+                payload = render_dashboard_v2_page().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if parsed.path == "/api/memos":
+                self.send_json({"memos": v2_ops.list_quick_notes()})
                 return
             if parsed.path == "/mobile":
                 payload = render_mobile_page().encode("utf-8")
@@ -303,6 +332,30 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/custom_types/add":
                 body = self.read_json()
                 self.send_json(add_custom_type(body.get("name") or ""))
+                return
+            if parsed.path == "/api/memos/add":
+                body = self.read_json()
+                self.send_json(v2_ops.add_quick_note(body.get("body")))
+                return
+            if parsed.path == "/api/memos/update":
+                body = self.read_json()
+                self.send_json(v2_ops.update_quick_note(body.get("id"), body))
+                return
+            if parsed.path == "/api/memos/delete":
+                body = self.read_json()
+                self.send_json(v2_ops.delete_quick_note(body.get("id")))
+                return
+            if parsed.path == "/api/orders/rename_order_no":
+                body = self.read_json()
+                self.send_json(v2_ops.rename_order_no(body.get("itemIds") or [], body.get("value") or ""))
+                return
+            if parsed.path == "/api/sap/open_obd":
+                body = self.read_json()
+                self.send_json(v2_ops.open_obd(body.get("deliveryNo") or ""))
+                return
+            if parsed.path == "/api/terminal/open_ticket":
+                body = self.read_json()
+                self.send_json(v2_ops.open_ticket(body.get("code") or ""))
                 return
             if parsed.path == "/api/pages/add":
                 body = self.read_json()

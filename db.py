@@ -357,6 +357,25 @@ def ensure_db():
             con.execute("ALTER TABLE orders ADD COLUMN manual_cell_count INTEGER")
         except sqlite3.OperationalError:
             pass
+        # flags (workbench ver.2, 2026-10-14): 메모칸 색 라벨 "Delayed"/"확인필요" 저장용.
+        # 쉼표로 구분한 문자열(예: "delayed,check"). v1은 이 컬럼을 모른 채 그대로 동작.
+        try:
+            con.execute("ALTER TABLE orders ADD COLUMN flags TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+        # side_memos (workbench ver.2; 예전 미사용 quick_notes 테이블과 별개): 오른쪽 열 "빠른 메모" - 임시로 적어두는 메모.
+        # 고정 메모(notepad_pages 탭)로 옮기면 그쪽에 새 탭이 생기고 여기서는 지워진다.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS side_memos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                body TEXT NOT NULL DEFAULT '',
+                pinned INTEGER NOT NULL DEFAULT 0,
+                done INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT
+            )
+            """
+        )
         # sn_relo_error: 회수 오더에 S/N이 없어서(X) 실제 회수된 S/N을
         # 워크벤치에 기록한 뒤 그 값을 오더(VA02)에 반영 시도했다가 실패한
         # 경우(firm/cust 불일치 등 - paper relo 필요)의 마지막 실패 사유

@@ -479,7 +479,7 @@ ITEM_EDIT_FIELDS = ("description", "material", "serial", "mode", "item_type")
 # onblur handler. deliveryNo (OBD/ORD/SDSK lines) has its own dedicated
 # update_delivery_codes() instead of going through this generic path, since
 # it's really 2 underlying columns (delivery_no + extra_codes) at once.
-ORDER_EDIT_FIELDS = ("customer", "phone", "address", "memo", "order_type")
+ORDER_EDIT_FIELDS = ("customer", "phone", "address", "memo", "order_type", "flags")
 
 
 def update_item_field(item_id, field, value):
@@ -880,6 +880,7 @@ def board_row(order, item, idx, total, highlights_by_item=None):
         "phone": order.get("phone") or "",
         "address": order.get("address") or "",
         "memo": order.get("memo") or "",
+        "flags": order.get("flags") or "",   # ver.2 메모칸 색 라벨(delayed/check) - v1 화면은 무시
         # Manual per-cell highlight (see cell_highlights/set_cell_highlight) -
         # {field: {"bg":..,"color":..,"bold":..}}, only for fields that
         # actually have one set. Always keyed to THIS item's id, whether or

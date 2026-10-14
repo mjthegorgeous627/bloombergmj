@@ -193,8 +193,44 @@ def open_serial(serial):
     return True
 
 
+def open_obd(delivery_no):
+    """새 SAP 세션에서 VL02N을 열어 OBD(배송문서)를 입력하고 Enter까지 눌러 그 배송문서 화면을
+    보여준다(workbench ver.2 OBD 바로가기, 2026-10-14). 화면 이동 전용 - 저장/변경 없음.
+    필드 ID(ctxtLIKP-VBELN)는 VL03N 진입 코드(manual_order_handler)와 같다. 시리얼 입력 창
+    까지 자동으로 들어가는 단계는 SAP 화면에서 실측 전이라 아직 넣지 않음(TODO)."""
+    delivery_no = "".join(ch for ch in str(delivery_no) if ch.isdigit())
+    if not delivery_no:
+        logger.error("OBD 번호가 비어 있습니다.")
+        return False
+    app = get_scripting_engine()
+    conn = app.Children(0)
+    try:
+        new_session = _create_new_session(conn)
+    except RuntimeError as e:
+        logger.error(str(e))
+        return False
+    if new_session is None:
+        logger.error("새 세션이 시간 내에 나타나지 않음 (생성 실패 또는 지연)")
+        return False
+    time.sleep(1)
+    try:
+        new_session.findById("wnd[0]/tbar[0]/okcd").text = "/nVL02N"
+        new_session.findById("wnd[0]").sendVKey(0)
+        time.sleep(1)
+        new_session.findById("wnd[0]/usr/ctxtLIKP-VBELN").text = delivery_no
+        new_session.findById("wnd[0]").sendVKey(0)
+        time.sleep(2)
+        logger.info(f"OBD {delivery_no} VL02N 진입: {new_session.findById('wnd[0]').Text}")
+    except Exception as e:
+        logger.warning(f"OBD {delivery_no} VL02N 진입 실패 (세션 자체는 열림): {e}")
+        return False
+    return True
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 2 and sys.argv[1].lower() == "serial":
+    if len(sys.argv) > 2 and sys.argv[1].lower() == "obd":
+        ok = open_obd(sys.argv[2])
+    elif len(sys.argv) > 2 and sys.argv[1].lower() == "serial":
         ok = open_serial(sys.argv[2])
     elif len(sys.argv) > 2 and sys.argv[1].lower() == "order":
         ok = open_order(sys.argv[2])
