@@ -64,7 +64,7 @@ SIDE_HTML = '''<aside id="sideCol" class="side-col">
       <h4>SAP</h4>
       <div class="srow">''' + B('runSap(\'all\')', '전체조회') + B('runSap(\'stop\')') + B('runSap(\'start\')', 'Start&amp;Loop') + '''</div>
       <div class="srow">''' + B('runZrecPrepare()', 'ZREC 처리') + B('runSnReloBatch()', 'S/N 오더 반영 시도') + '''</div>
-      <details class="side-det"><summary>SAP 도구 (오더 수집 · 오더 조회 · SN 조회 · SAP Tab+)</summary>
+      <details class="side-det"><summary>SAP 도구</summary>
         <div class="ctrl-inline">''' + B('runOrderNoAction()', '오더 수집') + INP('orderNoInput', '오더번호', 'runOrderNoAction') + '''</div>
         <div class="ctrl-inline">''' + B('runOrderJumpAction()', '오더 조회') + INP('orderJumpInput', '오더번호', 'runOrderJumpAction') + '''</div>
         <div class="ctrl-inline">''' + B('runSerialLookupAction()', 'SN 조회') + INP('serialLookupInput', 'Serial Number', 'runSerialLookupAction') + '''</div>

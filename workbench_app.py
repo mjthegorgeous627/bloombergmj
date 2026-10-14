@@ -481,15 +481,16 @@ def _acquire_single_instance_lock():
     return True
 
 
-def serve(host, port, open_browser=True):
+def serve(host, port, open_browser=True, page=""):
     url = f"http://{host}:{port}/"
+    open_url = url + page.lstrip("/")   # --page v2 : 브라우저만 /v2 로 연다(서버/DB는 동일)
     if not _acquire_single_instance_lock():
         # 이미 다른 workbench_app.py 서버가 떠 있음 - 새 서버를 띄우는 대신
         # 기존 서버의 브라우저 탭만 열어준다(수동 실행/워치독/아침 루틴
         # 어느 경로로 여기 왔든 동일하게 안전한 동작).
         logger.info(f"workbench_app.py 이미 실행 중인 인스턴스가 있음 - 새 서버 없이 브라우저만 엶: {url}")
         if open_browser:
-            webbrowser.open(url)
+            webbrowser.open(open_url)
         return
     # 위 뮤텍스가 최종 방어선이지만, 혹시 뮤텍스가 뚫리는 경우에도(예: 다른
     # 사용자 세션) 포트가 이미 쓰이고 있으면 조용히 이중 bind되지 않고
@@ -513,7 +514,7 @@ def serve(host, port, open_browser=True):
     except Exception:
         logger.warning("시작 토스트 알림 실패(무시)", exc_info=True)
     if open_browser:
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.8, lambda: webbrowser.open(open_url)).start()
     try:
         server.serve_forever()
     except Exception:
@@ -530,6 +531,7 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-open", action="store_true")
+    parser.add_argument("--page", default="", help="브라우저로 열 화면 경로 (예: v2). 기본은 v1(/)")
     # Manual/emergency-only from here on - see load_today_from_excel()'s own
     # docstring for why. The routine SAP->workbench path is --import-rows-json.
     parser.add_argument("--import-today", action="store_true")
@@ -555,7 +557,7 @@ def main():
             rows = json.load(fh)
         print(json.dumps(import_sap_rows(rows), ensure_ascii=False, indent=2))
         return
-    serve(args.host, args.port, open_browser=not args.no_open)
+    serve(args.host, args.port, open_browser=not args.no_open, page=args.page)
 
 
 if __name__ == "__main__":

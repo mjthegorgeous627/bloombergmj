@@ -120,6 +120,11 @@ def start_sap_loop():
     logger.info("SAP 시작 & 루프 실행")
 
 
+# 2026-10-14 사용자 요청: 2026-10-15 아침부터 v1 대신 v2(/v2)로 시작. 문제가 생기면 ""(빈 문자열)로
+# 바꾸면 다시 v1(/)로 열린다(서버·DB는 동일).
+WORKBENCH_START_PAGE = "v2"
+
+
 def start_workbench():
     """2026-08-31 수정: 예전엔 workbench_app.py가 이미 떠있으면 여기서
     그냥 건너뛰었는데, 그러면 브라우저 탭이 아예 안 열려서 "아침에
@@ -135,7 +140,7 @@ def start_workbench():
     탭만 여는 걸 보장하므로 중복 실행 위험은 없다(트레이 아이콘의
     "Workbench 열기" 메뉴와 완전히 같은 방식)."""
     subprocess.Popen(
-        [sys.executable, "workbench_app.py"], cwd=BASE_DIR,
+        [sys.executable, "workbench_app.py", "--page", WORKBENCH_START_PAGE], cwd=BASE_DIR,
         creationflags=subprocess.CREATE_NEW_CONSOLE,
     )
     logger.info("workbench 실행 (이미 떠있으면 브라우저 탭만 열림)")
