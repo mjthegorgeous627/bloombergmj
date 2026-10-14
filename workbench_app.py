@@ -329,6 +329,9 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.read_json()
                 self.send_json(unmerge_orders(body.get("itemIds") or [], body.get("fields") or []))
                 return
+            if parsed.path == "/api/redo":
+                self.send_json(redo_last_action())
+                return
             if parsed.path == "/api/undo":
                 self.send_json(undo_last_action())
                 return

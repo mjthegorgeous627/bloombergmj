@@ -46,6 +46,7 @@ HIDDEN = '''<div class="controls" id="hiddenCtl" style="display:none">
   <span class="ff-spacer"></span>
   <button type="button" class="ff-ico ff-quick" onclick="openQuickPrint()" title="퀵 기사님 안내문 인쇄 - 체크한 행을 퀵으로 보낼 때">퀵</button>
   <button type="button" class="ff-ico" onclick="undoLastAction()" title="실행취소 (Ctrl+Z) - 삭제/날짜이동/완료처리를 최근 20건까지 되돌림">↶</button>
+  <button type="button" class="ff-ico" onclick="redoLastAction()" title="다시실행 (Ctrl+Shift+Z 또는 Ctrl+Y) - 방금 실행취소한 작업을 다시 적용">↷</button>
   <button type="button" class="ff-ico" onclick="openTrash()" title="삭제된 항목 보기 (휴지통) - 7일 안이면 복구 가능">🗑</button>
 </div>
 '''

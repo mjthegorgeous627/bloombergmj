@@ -363,6 +363,19 @@ def ensure_db():
             con.execute("ALTER TABLE orders ADD COLUMN flags TEXT NOT NULL DEFAULT ''")
         except sqlite3.OperationalError:
             pass
+        # redo_batches (workbench ver.2, 2026-10-14): 실행취소로 되돌린 작업을 다시 실행(↷)하기 위한 스택.
+        # rows_json = 되돌리기 직전 "현재 값" 스냅샷(action_log와 같은 모양). 새 작업이 기록되면 비워진다.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS redo_batches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action_type TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                rows_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT
+            )
+            """
+        )
         # side_memos (workbench ver.2; 예전 미사용 quick_notes 테이블과 별개): 오른쪽 열 "빠른 메모" - 임시로 적어두는 메모.
         # 고정 메모(notepad_pages 탭)로 옮기면 그쪽에 새 탭이 생기고 여기서는 지워진다.
         con.execute(
@@ -551,11 +564,87 @@ def _log_action_batch(con, action_type, summary, item_prev_pairs):
         "INSERT INTO action_log(batch_id, item_id, prev_value) VALUES (?, ?, ?)",
         [(batch_id, item_id, prev_value) for item_id, prev_value in item_prev_pairs],
     )
+    if not _REDO_IN_PROGRESS:
+        try:
+            con.execute("DELETE FROM redo_batches")   # 새 작업이 생기면 다시실행 기록은 무효
+        except sqlite3.OperationalError:
+            pass
     con.execute(
         "DELETE FROM action_batches WHERE id NOT IN "
         "(SELECT id FROM action_batches ORDER BY id DESC LIMIT ?)",
         (UNDO_HISTORY_LIMIT,),
     )
+
+
+_REDO_IN_PROGRESS = False
+_UNDO_COLUMN = {"delete": "deleted_at", "move_date": "item_date", "status": "board_status", "reorder": "board_pos"}
+
+
+def _apply_prior(con, action_type, log_rows):
+    """log_rows(prev_value 모양)의 값을 DB에 그대로 써 넣는다 - 실행취소와 다시실행이 같은 코드를 쓴다.
+    merge/unmerge/edit_delivery_codes 는 orders 의 여러 칸을 JSON {칸: 값}으로, edit_item/edit_order 는
+    {field, value}로, edit_highlight 는 {field, style_json}으로, 나머지는 order_items 한 칸 값으로 담는다."""
+    if action_type in ("merge", "unmerge", "edit_delivery_codes"):
+        for row in log_rows:
+            prior = json.loads(row["prev_value"]) if row["prev_value"] else {}
+            for col, val in prior.items():
+                con.execute(f"UPDATE orders SET {col}=? WHERE id=?", (val, row["item_id"]))
+    elif action_type == "edit_item":
+        for row in log_rows:
+            prior = json.loads(row["prev_value"])
+            con.execute(f"UPDATE order_items SET {prior['field']}=? WHERE id=?", (prior["value"], row["item_id"]))
+    elif action_type == "edit_order":
+        for row in log_rows:
+            prior = json.loads(row["prev_value"])
+            con.execute(f"UPDATE orders SET {prior['field']}=? WHERE id=?", (prior["value"], row["item_id"]))
+    elif action_type == "edit_highlight":
+        for row in log_rows:
+            prior = json.loads(row["prev_value"])
+            field, style_json = prior["field"], prior["style_json"]
+            if style_json:
+                con.execute(
+                    "INSERT INTO cell_highlights(item_id, field, style_json) VALUES(?,?,?) "
+                    "ON CONFLICT(item_id, field) DO UPDATE SET style_json=excluded.style_json",
+                    (row["item_id"], field, style_json),
+                )
+            else:
+                con.execute("DELETE FROM cell_highlights WHERE item_id=? AND field=?", (row["item_id"], field))
+    else:
+        column = _UNDO_COLUMN[action_type]
+        for row in log_rows:
+            con.execute(f"UPDATE order_items SET {column}=? WHERE id=?", (row["prev_value"], row["item_id"]))
+
+
+def _snapshot_current(con, action_type, log_rows):
+    """log_rows가 건드리는 칸들의 "지금 값"을 log_rows와 같은 모양([{item_id, prev_value}])으로 읽는다."""
+    out = []
+    for row in log_rows:
+        item_id = row["item_id"]
+        if action_type in ("merge", "unmerge", "edit_delivery_codes"):
+            prior = json.loads(row["prev_value"]) if row["prev_value"] else {}
+            cur = {}
+            if prior:
+                r = con.execute(f"SELECT {', '.join(prior.keys())} FROM orders WHERE id=?", (item_id,)).fetchone()
+                cur = {k: r[k] for k in prior.keys()} if r else {}
+            val = json.dumps(cur)
+        elif action_type == "edit_item":
+            prior = json.loads(row["prev_value"])
+            r = con.execute(f"SELECT {prior['field']} FROM order_items WHERE id=?", (item_id,)).fetchone()
+            val = json.dumps({"field": prior["field"], "value": r[0] if r else None})
+        elif action_type == "edit_order":
+            prior = json.loads(row["prev_value"])
+            r = con.execute(f"SELECT {prior['field']} FROM orders WHERE id=?", (item_id,)).fetchone()
+            val = json.dumps({"field": prior["field"], "value": r[0] if r else None})
+        elif action_type == "edit_highlight":
+            prior = json.loads(row["prev_value"])
+            r = con.execute("SELECT style_json FROM cell_highlights WHERE item_id=? AND field=?", (item_id, prior["field"])).fetchone()
+            val = json.dumps({"field": prior["field"], "style_json": r[0] if r else None})
+        else:
+            column = _UNDO_COLUMN[action_type]
+            r = con.execute(f"SELECT {column} FROM order_items WHERE id=?", (item_id,)).fetchone()
+            val = r[0] if r else None
+        out.append({"item_id": item_id, "prev_value": val})
+    return out
 
 
 def undo_last_action():
@@ -564,46 +653,42 @@ def undo_last_action():
         if not batch:
             return {"undone": False, "message": "되돌릴 작업이 없습니다"}
         log_rows = con.execute("SELECT * FROM action_log WHERE batch_id=?", (batch["id"],)).fetchall()
-        # merge/unmerge touch one or more `orders.merge_group_<field>` columns
-        # at once, and edit_delivery_codes touches delivery_no+extra_codes
-        # together (item_id column here actually holds an order id for all
-        # three action types) - prev_value is a JSON {column: prior_value}
-        # blob since the exact set of touched columns varies per action,
-        # unlike every other action type below which always touches one
-        # fixed order_items column keyed by a real item id.
-        if batch["action_type"] in ("merge", "unmerge", "edit_delivery_codes"):
-            for row in log_rows:
-                prior = json.loads(row["prev_value"]) if row["prev_value"] else {}
-                for col, val in prior.items():
-                    con.execute(f"UPDATE orders SET {col}=? WHERE id=?", (val, row["item_id"]))
-        elif batch["action_type"] == "edit_item":
-            for row in log_rows:
-                prior = json.loads(row["prev_value"])
-                con.execute(f"UPDATE order_items SET {prior['field']}=? WHERE id=?", (prior["value"], row["item_id"]))
-        elif batch["action_type"] == "edit_order":
-            for row in log_rows:
-                prior = json.loads(row["prev_value"])
-                con.execute(f"UPDATE orders SET {prior['field']}=? WHERE id=?", (prior["value"], row["item_id"]))
-        elif batch["action_type"] == "edit_highlight":
-            for row in log_rows:
-                prior = json.loads(row["prev_value"])
-                field, style_json = prior["field"], prior["style_json"]
-                if style_json:
-                    con.execute(
-                        "INSERT INTO cell_highlights(item_id, field, style_json) VALUES(?,?,?) "
-                        "ON CONFLICT(item_id, field) DO UPDATE SET style_json=excluded.style_json",
-                        (row["item_id"], field, style_json),
-                    )
-                else:
-                    con.execute("DELETE FROM cell_highlights WHERE item_id=? AND field=?", (row["item_id"], field))
-        else:
-            column = {
-                "delete": "deleted_at", "move_date": "item_date", "status": "board_status", "reorder": "board_pos",
-            }[batch["action_type"]]
-            for row in log_rows:
-                con.execute(f"UPDATE order_items SET {column}=? WHERE id=?", (row["prev_value"], row["item_id"]))
+        # ver.2 다시실행(↷)용: 되돌리기 전 "현재 값"을 스냅샷으로 남겨 둔다(v1 동작에는 영향 없음)
+        try:
+            snap = _snapshot_current(con, batch["action_type"], log_rows)
+            con.execute(
+                "INSERT INTO redo_batches(action_type, summary, rows_json, created_at) VALUES (?, ?, ?, ?)",
+                (batch["action_type"], batch["summary"], json.dumps(snap), now_text()),
+            )
+            con.execute(
+                "DELETE FROM redo_batches WHERE id NOT IN (SELECT id FROM redo_batches ORDER BY id DESC LIMIT ?)",
+                (UNDO_HISTORY_LIMIT,),
+            )
+        except Exception:
+            pass   # 스냅샷 실패가 실행취소 자체를 막으면 안 됨
+        _apply_prior(con, batch["action_type"], log_rows)
         con.execute("DELETE FROM action_batches WHERE id=?", (batch["id"],))
         return {"undone": True, "summary": batch["summary"], "affected": len(log_rows)}
+
+
+def redo_last_action():
+    """바로 앞의 실행취소를 다시 적용한다. 적용 후엔 다시 실행취소(Ctrl+Z)할 수 있다."""
+    global _REDO_IN_PROGRESS
+    with connect() as con:
+        red = con.execute("SELECT * FROM redo_batches ORDER BY id DESC LIMIT 1").fetchone()
+        if not red:
+            return {"redone": False, "message": "다시 실행할 작업이 없습니다"}
+        forward = [{"item_id": r["item_id"], "prev_value": r["prev_value"]} for r in json.loads(red["rows_json"])]
+        # 다시실행 직전 값(= 실행취소된 상태)을 새 실행취소 기록으로 남긴다
+        before = _snapshot_current(con, red["action_type"], forward)
+        _REDO_IN_PROGRESS = True
+        try:
+            _log_action_batch(con, red["action_type"], red["summary"], [(b["item_id"], b["prev_value"]) for b in before])
+        finally:
+            _REDO_IN_PROGRESS = False
+        _apply_prior(con, red["action_type"], forward)
+        con.execute("DELETE FROM redo_batches WHERE id=?", (red["id"],))
+        return {"redone": True, "summary": red["summary"], "affected": len(forward)}
 
 
 def _pop_prior_item_state(prior_by_key, prior_by_line, item, line_no):
