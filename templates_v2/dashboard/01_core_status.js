@@ -328,6 +328,7 @@ async function runPortalBatch(){
     const result=await pollOrderDone(orderId, 360000);
     if(result.status==='printed'){
       toast(label+' 완료');
+      autoPrintPod(orderId);
     } else if(result.status==='timeout'){
       toast(label+' 시간 초과 (6분) - 상태를 직접 확인하세요. 나머지 오더는 중단합니다');
       return;

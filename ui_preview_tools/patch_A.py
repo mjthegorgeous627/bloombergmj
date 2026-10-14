@@ -88,11 +88,16 @@ s, n = re.subn(r'(<div class="topbar-right">)', r'<a href="/" title="원래 화
 assert n == 1, 'v2badge'
 wr('dashboard.html', s)
 
+# ---- POD 자동 인쇄: Serial 등록 & QR 인쇄가 한 오더를 끝낼 때 ----
+j1 = rd('dashboard/01_core_status.js')
+j1 = sub1(j1, "    if(result.status==='printed'){\n      toast(label+' 완료');", "    if(result.status==='printed'){\n      toast(label+' 완료');\n      autoPrintPod(orderId);", 'podhook')
+wr('dashboard/01_core_status.js', j1)
+
 # ---- style.css / 09 ----
 s = rd('dashboard/style.css')
 s += open(os.path.join(HERE, 'A_extra.css'), encoding='utf-8').read() + open(os.path.join(HERE, 'quick.css'), encoding='utf-8').read()
 wr('dashboard/style.css', s)
-wr('dashboard/09_side_panel.js', open(os.path.join(HERE, 'A_09_side_panel.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_quick.js'), encoding='utf-8').read())
+wr('dashboard/09_side_panel.js', open(os.path.join(HERE, 'A_09_side_panel.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_quick.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_forms.js'), encoding='utf-8').read())
 # 실제 서버용 사본: sap_automation\templates_v2 (PREVIEW_ONLY 환경에서는 건너뜀)
 V2 = os.environ.get('V2_DIR')
 if V2:

@@ -345,6 +345,10 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.read_json()
                 self.send_json(add_custom_type(body.get("name") or ""))
                 return
+            if parsed.path == "/api/forms/print":
+                body = self.read_json()
+                self.send_json(v2_ops.print_sign_form(body.get("kind"), body.get("order") or {}))
+                return
             if parsed.path == "/api/memos/add":
                 body = self.read_json()
                 self.send_json(v2_ops.add_quick_note(body.get("body")))

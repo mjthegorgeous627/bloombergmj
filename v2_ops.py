@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
@@ -164,3 +165,25 @@ def quick_suggest(company_en):
         if len(out) >= 3:
             break
     return {"suggestions": out}
+
+
+# ---------------- 서명 용지 (POD/POC) ----------------
+def print_sign_form(kind, order):
+    """POD(ZOR 배송)/POC(ZRE 회수) 서명 용지를 채워서 기본 프린터로 인쇄한다(sign_forms.py를 별도 프로세스로).
+    교체(ZRX)·내부배송(ZINT/ZINP 등)은 대상이 아니라 서버에서도 한 번 더 거른다."""
+    import tempfile
+    kind = str(kind or "").lower()
+    prefix = str((order or {}).get("prefix") or "").upper()
+    if kind not in ("pod", "poc"):
+        return {"started": False, "message": "종류는 pod 또는 poc 입니다."}
+    if (kind == "pod" and prefix != "ZOR") or (kind == "poc" and prefix != "ZRE"):
+        return {"started": False, "message": f"{kind.upper()} 서명 용지는 {'ZOR' if kind == 'pod' else 'ZRE'} 오더만 인쇄합니다 ({prefix or '?'} 제외)."}
+    if not (order.get("items") or []):
+        return {"started": False, "message": "품목이 없습니다."}
+    fd, path = tempfile.mkstemp(prefix="signjob_", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"mode": "print", "kind": kind, "order": order}, fh, ensure_ascii=False)
+    proc = subprocess.Popen(
+        [sys.executable, "sign_forms.py", path], cwd=str(BASE_DIR), creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    return {"started": True, "pid": proc.pid}

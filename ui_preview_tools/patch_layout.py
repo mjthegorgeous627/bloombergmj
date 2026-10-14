@@ -42,6 +42,7 @@ HIDDEN = '''<div class="controls" id="hiddenCtl" style="display:none">
   <span class="ff-sep"></span>
   <span class="ff-act">''' + B('processDone()') + B('processPickupReady()', 'Ready') + B('processCancel()') + B('processReset()') + B('processBilled()') + '''</span>
   <span class="ff-hist"><input id="histQ" type="search" placeholder="이력 검색" autocomplete="off" spellcheck="false" title="오더번호 / 시리얼 / 고객 등으로 예전 배송 이력 조회"></span>
+  <span class="ff-forms"><label class="ff-chk" title="켜 두면 'Serial 등록 & QR 인쇄' 때 ZOR 오더의 POD(배송 서명 용지)도 자동 인쇄됩니다. [인쇄] 버튼에서도 이 칸이 켜져 있어야 POD가 인쇄됩니다."><input type="checkbox" id="chk_pod">pod</label><label class="ff-chk" title="[인쇄] 시 체크한 ZRE(회수) 오더의 POC(회수 서명 용지, 고객용+우리용)를 인쇄합니다."><input type="checkbox" id="chk_poc">poc</label><button type="button" class="btn ff-formbtn" onclick="printSignForms()" title="체크한 오더 행의 서명 용지 인쇄 (pod=ZOR 배송, poc=ZRE 회수 · 교체 ZRX/내부배송 제외)">인쇄</button></span>
   <span class="ff-spacer"></span>
   <button type="button" class="ff-ico ff-quick" onclick="openQuickPrint()" title="퀵 기사님 안내문 인쇄 - 체크한 행을 퀵으로 보낼 때">퀵</button>
   <button type="button" class="ff-ico" onclick="undoLastAction()" title="실행취소 (Ctrl+Z) - 삭제/날짜이동/완료처리를 최근 20건까지 되돌림">↶</button>
