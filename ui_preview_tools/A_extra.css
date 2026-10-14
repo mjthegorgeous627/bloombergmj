@@ -196,3 +196,6 @@ body.side-closed .pin-panel{right:56px}
 .ff-chk{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;color:#334155;cursor:pointer;user-select:none}
 .ff-chk input{margin:0}
 .btn.ff-formbtn{display:inline-block;width:auto;height:24px;padding:0 12px;margin:0;font-size:12px}
+
+/* 마감 완료된 날짜(보드엔 남은 행 없음): 숫자만 연한 회색 알약 */
+.sc-day.fin .c{background:#e2e8f0;color:#475569}

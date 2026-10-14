@@ -19,7 +19,7 @@ def rsub1(s, pat, new, label):
 
 # ---- 03_zrec.js : 필터 상태 (첫 renderAll 이전에 있어야 함) ----
 s = rd('dashboard/03_zrec.js')
-s = sub1(s, 'let ROWS = [];', 'let ROWS = [];\nlet BOARD_FILTER = \'all\';  // 메모 라벨 모아보기: all | delayed | check', 'ROWS')
+s = sub1(s, 'let ROWS = [];', 'let ROWS = [];\nlet BOARD_FILTER = \'all\';  // 메모 라벨 모아보기: all | delayed | check\nlet SIDE_FIN = {};           // 달력: { 날짜: 마감 완료 오더 수 } (첫 renderAll 이전에 선언돼야 함)\nlet SIDE_FIN_LOADED = {};    // 달력: 이미 불러온 달', 'ROWS')
 wr('dashboard/03_zrec.js', s)
 
 # ---- 04_board_model.js : 편집 칸 안의 비편집 요소(라벨/아이콘)는 저장 값에서 제외 ----
@@ -92,6 +92,11 @@ wr('dashboard.html', s)
 j1 = rd('dashboard/01_core_status.js')
 j1 = sub1(j1, "    if(result.status==='printed'){\n      toast(label+' 완료');", "    if(result.status==='printed'){\n      toast(label+' 완료');\n      autoPrintPod(orderId);", 'podhook')
 wr('dashboard/01_core_status.js', j1)
+
+# ---- 마감 후에도 달력 숫자 유지: 마감 성공 시 날짜별 오더 수를 기록 ----
+j8 = rd('dashboard/08_finalize_init.js')
+j8 = sub1(j8, "  ROWS = ROWS.filter(r=>!checkedRowKeys.has(r.rowKey));\n  isos.forEach(iso=>EXPORT_DATES.delete(iso));", "  if(typeof recordFinalizedCounts==='function') recordFinalizedCounts(checkedRows);\n  ROWS = ROWS.filter(r=>!checkedRowKeys.has(r.rowKey));\n  isos.forEach(iso=>EXPORT_DATES.delete(iso));", 'finrec')
+wr('dashboard/08_finalize_init.js', j8)
 
 # ---- style.css / 09 ----
 s = rd('dashboard/style.css')

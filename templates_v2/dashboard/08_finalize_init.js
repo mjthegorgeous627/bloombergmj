@@ -118,6 +118,7 @@ async function finalizeCheckedRun(checkedRows, checkedRowKeys, isos, payload){
     toast('엑셀 저장은 됐지만('+summary+') workbench.db 정리는 실패: '+err.message);
     return;
   }
+  if(typeof recordFinalizedCounts==='function') recordFinalizedCounts(checkedRows);
   ROWS = ROWS.filter(r=>!checkedRowKeys.has(r.rowKey));
   isos.forEach(iso=>EXPORT_DATES.delete(iso));
   renderAll();

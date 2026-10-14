@@ -149,6 +149,10 @@ class Handler(BaseHTTPRequestHandler):
                 qs = parse_qs(parsed.query)
                 self.send_json(v2_ops.quick_suggest(qs.get("company", [""])[0]))
                 return
+            if parsed.path == "/api/calendar/counts":
+                qs = parse_qs(parsed.query)
+                self.send_json(v2_ops.calendar_counts(qs.get("from", ["2000-01-01"])[0], qs.get("to", ["2100-01-01"])[0]))
+                return
             if parsed.path == "/api/memos":
                 self.send_json({"memos": v2_ops.list_quick_notes()})
                 return
@@ -351,6 +355,10 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/forms/print":
                 body = self.read_json()
                 self.send_json(v2_ops.print_sign_form(body.get("kind"), body.get("order") or {}))
+                return
+            if parsed.path == "/api/calendar/finalized":
+                body = self.read_json()
+                self.send_json(v2_ops.add_finalized_counts(body.get("counts") or {}))
                 return
             if parsed.path == "/api/memos/add":
                 body = self.read_json()

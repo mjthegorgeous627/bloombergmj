@@ -30,6 +30,26 @@ function openSideCol(){
 }
 
 // ---------- 날짜별 집계 / 달력 ----------
+// (SIDE_FIN / SIDE_FIN_LOADED 는 첫 renderAll() 이전에 있어야 해서 03_zrec.js 쪽에 선언됨)
+function loadSideFin(y, m, force){
+  const key = y + '-' + String(m + 1).padStart(2, '0');
+  if(SIDE_FIN_LOADED[key] && !force) return;
+  SIDE_FIN_LOADED[key] = 1;
+  const from = key + '-01', to = key + '-' + String(new Date(y, m + 1, 0).getDate()).padStart(2, '0');
+  fetch('/api/calendar/counts?from=' + from + '&to=' + to).then(r => r.json()).then(d => {
+    const c = (d && d.counts) || {};
+    Object.keys(c).forEach(iso => { SIDE_FIN[iso] = Math.max(SIDE_FIN[iso] || 0, c[iso] || 0); });
+    renderSideCalendar();
+  }).catch(() => { SIDE_FIN_LOADED[key] = 0; });
+}
+// 마감 직후: 방금 마감한 행들의 날짜별 오더 수를 서버에 누적하고(이력 재색인 전 공백 보완) 화면에도 바로 반영
+function recordFinalizedCounts(rows){
+  const per = {};
+  rows.forEach(r => { const k = (typeof mergeKey === 'function' ? mergeKey(r) : '') || r.rowKey; (per[r.date] = per[r.date] || {})[k] = 1; });
+  const counts = {};
+  Object.keys(per).forEach(iso => { counts[iso] = Object.keys(per[iso]).length; SIDE_FIN[iso] = (SIDE_FIN[iso] || 0) + counts[iso]; });
+  try{ fetch('/api/calendar/finalized', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ counts: counts }) }).catch(() => {}); }catch(e){}
+}
 function sideDateStat(iso){
   const rs = ROWS.filter(r => r.date === iso);
   const keys = {};
@@ -39,7 +59,8 @@ function sideDateStat(iso){
     if(!['done', 'cancelled', 'billed'].includes(r.uiStatus)) left++;
     if(r.uiStatus === 'pending') pend++;
   });
-  return { ord: Object.keys(keys).length, it: rs.length, left: left, pend: pend };
+  const fin = SIDE_FIN[iso] || 0;   // 마감(내보내기+삭제)으로 보드에서 사라진 오더 수 - 달력 숫자가 마감 후에도 남게 함
+  return { ord: Object.keys(keys).length, fin: fin, tot: Object.keys(keys).length + fin, it: rs.length, left: left, pend: pend };
 }
 function _sideIso(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 
@@ -52,8 +73,9 @@ function renderSideCalendar(){
   const first = new Date(y, m, 1).getDay(), dim = new Date(y, m + 1, 0).getDate();
   const td = sideDateStat(today);
   let wk = 0;
-  for(let i = 0; i < 7; i++){ const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() + i); wk += sideDateStat(_sideIso(d)).ord; }
-  let h = '<div class="sc-sum"><span class="sc-acc">오늘 ' + td.ord + '건</span><span>남음 ' + td.left + '</span><span>7일간 ' + wk + '건</span></div>';
+  for(let i = 0; i < 7; i++){ const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() + i); wk += sideDateStat(_sideIso(d)).tot; }
+  loadSideFin(y, m);
+  let h = '<div class="sc-sum"><span class="sc-acc">오늘 ' + td.tot + '건</span><span>남음 ' + td.left + '</span><span>7일간 ' + wk + '건</span></div>';
   h += '<div class="sc-nav"><button type="button" onclick="sideCalNav(-1)" aria-label="이전 달">‹</button><span>' + y + '. ' + String(m + 1).padStart(2, '0') + '</span><button type="button" onclick="sideCalNav(1)" aria-label="다음 달">›</button></div>';
   h += '<div class="sc-grid">';
   ['일', '월', '화', '수', '목', '금', '토'].forEach(w => { h += '<span class="sc-wd">' + w + '</span>'; });
@@ -63,9 +85,9 @@ function renderSideCalendar(){
     let cls = 'sc-day';
     if(info.non) cls += ' non';
     if(iso === today) cls += ' today';
-    if(s.ord) cls += s.pend ? ' pend' : (s.left ? ' left' : ' done');
-    const tip = (info.non ? info.label + ' · ' : '') + (s.ord ? '오더 ' + s.ord + ' · 품목 ' + s.it + ' · 남음 ' + s.left + (s.pend ? ' · 회수 대기 ' + s.pend : '') : '확정된 건 없음');
-    h += '<button type="button" class="' + cls + '" title="' + tip + '" onclick="sideCalClick(\'' + iso + '\',event)" oncontextmenu="sideCalHoliday(\'' + iso + '\',event)"><span class="n">' + d + '</span>' + (s.ord ? '<span class="c">' + s.ord + '</span>' : '') + '</button>';
+    if(s.tot) cls += s.ord ? (s.pend ? ' pend' : (s.left ? ' left' : ' done')) : ' done fin';
+    const tip = (info.non ? info.label + ' · ' : '') + (s.tot ? '오더 ' + s.tot + (s.fin ? ' (마감 ' + s.fin + ')' : '') + (s.ord ? ' · 품목 ' + s.it + ' · 남음 ' + s.left + (s.pend ? ' · 회수 대기 ' + s.pend : '') : '') : '확정된 건 없음');
+    h += '<button type="button" class="' + cls + '" title="' + tip + '" onclick="sideCalClick(\'' + iso + '\',event)" oncontextmenu="sideCalHoliday(\'' + iso + '\',event)"><span class="n">' + d + '</span>' + (s.tot ? '<span class="c">' + s.tot + '</span>' : '') + '</button>';
   }
   h += '</div>';
   h += '<div class="sc-leg">우클릭 = 휴무일 지정/해제</div>';

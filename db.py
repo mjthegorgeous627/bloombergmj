@@ -376,6 +376,18 @@ def ensure_db():
             )
             """
         )
+        # finalized_counts (workbench ver.2, 2026-10-14): 마감(내보내기+삭제)으로 보드에서 사라진 오더 수를
+        # 날짜별로 누적 - 달력의 "그날 몇 건 했는지" 숫자가 마감 후에도 남게 한다. 이력(history.db)은 마감 직후
+        # 비동기로 재색인되어 잠깐 비어 있으므로 그 사이를 메우는 용도(두 값 중 큰 쪽을 표시).
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finalized_counts (
+                date TEXT PRIMARY KEY,
+                orders INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT
+            )
+            """
+        )
         # side_memos (workbench ver.2; 예전 미사용 quick_notes 테이블과 별개): 오른쪽 열 "빠른 메모" - 임시로 적어두는 메모.
         # 고정 메모(notepad_pages 탭)로 옮기면 그쪽에 새 탭이 생기고 여기서는 지워진다.
         con.execute(

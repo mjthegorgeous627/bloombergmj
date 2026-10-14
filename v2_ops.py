@@ -187,3 +187,49 @@ def print_sign_form(kind, order):
         [sys.executable, "sign_forms.py", path], cwd=str(BASE_DIR), creationflags=subprocess.CREATE_NO_WINDOW,
     )
     return {"started": True, "pid": proc.pid}
+
+
+# ---------------- 달력: 마감된 날짜별 오더 수 ----------------
+def calendar_counts(date_from, date_to):
+    """마감 후 보드에서 사라진 오더의 날짜별 개수 {iso: n}. history.db(엑셀 마감 이력: 날짜별 오더 묶음 수,
+    같은 날짜 시트가 여럿이면 큰 값)와 finalized_counts(방금 마감한 것, 재색인 전 공백 보완) 중 큰 쪽."""
+    import history_search
+    out = {}
+    try:
+        conn = history_search._connect()
+        try:
+            rows = conn.execute(
+                "SELECT s.sheet_date AS d, s.id AS sid, COUNT(DISTINCT r.group_no) AS n "
+                "FROM sheets s JOIN rows r ON r.sheet_id = s.id "
+                "WHERE s.sheet_date BETWEEN ? AND ? GROUP BY s.id",
+                (date_from, date_to),
+            ).fetchall()
+        finally:
+            conn.close()
+        for r in rows:
+            out[r["d"]] = max(out.get(r["d"], 0), r["n"])
+    except Exception:
+        pass
+    ensure_db()
+    with connect() as con:
+        for r in con.execute("SELECT date, orders FROM finalized_counts WHERE date BETWEEN ? AND ?", (date_from, date_to)).fetchall():
+            out[r["date"]] = max(out.get(r["date"], 0), r["orders"])
+    return {"counts": out}
+
+
+def add_finalized_counts(counts):
+    """마감 직후 화면이 알려준 {iso: 오더 수}를 누적한다."""
+    ensure_db()
+    n = 0
+    with connect() as con:
+        for iso, c in (counts or {}).items():
+            c = int(c or 0)
+            if c <= 0 or not str(iso).startswith("20"):
+                continue
+            con.execute(
+                "INSERT INTO finalized_counts(date, orders, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(date) DO UPDATE SET orders = orders + excluded.orders, updated_at = excluded.updated_at",
+                (str(iso), c, now_text()),
+            )
+            n += 1
+    return {"added": n}

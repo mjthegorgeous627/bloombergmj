@@ -162,6 +162,8 @@ async function runZrecPrepare(){
 // after arbitrary edits, rather than patching DOM rowspans incrementally.
 let ROWS = [];
 let BOARD_FILTER = 'all';  // 메모 라벨 모아보기: all | delayed | check
+let SIDE_FIN = {};           // 달력: { 날짜: 마감 완료 오더 수 } (첫 renderAll 이전에 선언돼야 함)
+let SIDE_FIN_LOADED = {};    // 달력: 이미 불러온 달
 const DATE_LABELS = {};
 const COLLAPSED_DATES = new Set();
 const EXPORT_DATES = new Set();
