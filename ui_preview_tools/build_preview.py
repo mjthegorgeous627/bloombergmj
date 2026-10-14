@@ -53,7 +53,8 @@ STUB = r'''<script>
     if(url==='/api/pages/add'){var np={id:pid++,title:body.title||'새 메모장',body:''};PAGES.push(np);return ok({added:true,id:np.id,title:np.title});}
     if(url==='/api/pages/edit'){PAGES.forEach(function(p){if(p.id===body.id)p[body.field]=body.value});return ok({updated:true});}
     if(url==='/api/pages/delete'){PAGES=PAGES.filter(function(p){return p.id!==body.id});return ok({deleted:true});}
-    if(url==='/api/sap/open_order'||url==='/api/forms/print'||url==='/api/sap/open_obd'||url==='/api/terminal/open_ticket') return ok({started:true,message:'미리보기: 실제로는 열리지 않습니다'});
+    if(url==='/api/forms/print') return ok({started:false,message:'미리보기 화면에서는 실제로 인쇄되지 않습니다 - 실제 workbench 주소(http://127.0.0.1:8765/v2)에서 사용하세요'});
+    if(url==='/api/sap/open_order'||url==='/api/sap/open_obd'||url==='/api/terminal/open_ticket') return ok({started:true,message:'미리보기: 실제로는 열리지 않습니다'});
     return ok({});
   };
   window.__PREVIEW__=true;
