@@ -42,7 +42,7 @@ function buildQuickSheet(d){
   }
   if(String(d.note || '').trim()){ const n = document.createElement('div'); n.className = 'qs-note'; n.textContent = d.note; el.appendChild(n); }
   const logo = document.createElement('img'); logo.className = 'qs-logo'; logo.alt = 'Bloomberg'; logo.src = window.__QUICK_LOGO__ || '/api/quick/logo';
-  el.appendChild(logo);
+  el.insertBefore(logo, el.firstChild);   // 로고는 제목 위(맨 위)
   return el;
 }
 let QUICK_ROWS = [];
