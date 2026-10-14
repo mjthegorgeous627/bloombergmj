@@ -40,7 +40,7 @@ body.side-closed .board-wrap{margin-right:56px}
 .sc-hols{display:flex;flex-direction:column;gap:1px;margin-top:5px;font-size:11px}
 .sc-hol b{color:#dc2626;font-family:Consolas,monospace}
 .sc-hol-none,.sc-leg{color:#94a3b8;font-size:10.5px}
-.sc-leg{margin-top:3px}
+.sc-leg{margin-top:4px;font-size:10px;text-align:right}
 .sc-day.today{background:#dbeafe}
 .sc-day.non.today{background:#fecaca}
 .sc-day.today .n{color:#1d4ed8;font-weight:700}

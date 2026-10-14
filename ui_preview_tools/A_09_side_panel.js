@@ -68,13 +68,7 @@ function renderSideCalendar(){
     h += '<button type="button" class="' + cls + '" title="' + tip + '" onclick="sideCalClick(\'' + iso + '\',event)" oncontextmenu="sideCalHoliday(\'' + iso + '\',event)"><span class="n">' + d + '</span>' + (s.ord ? '<span class="c">' + s.ord + '</span>' : '') + '</button>';
   }
   h += '</div>';
-  let hl = '';
-  for(let d = 1; d <= dim; d++){
-    const iso = _calIso(y, m, d), info = nonworkingInfo(iso), dow = new Date(iso + 'T00:00:00').getDay();
-    if(info.non && info.label !== '주말') hl += '<span class="sc-hol"><b>' + (m + 1) + '/' + d + '</b> ' + info.label + '</span>';
-  }
-  h += '<div class="sc-hols">' + (hl || '<span class="sc-hol-none">이달 공휴일 없음</span>') + '</div>';
-  h += '<div class="sc-leg">빨간 칸 = 주말·공휴일(자동화 쉬는 날) · 우클릭/Ctrl+클릭 = 휴무일 지정/해제</div>';
+  h += '<div class="sc-leg">우클릭 = 휴무일 지정/해제</div>';
   host.innerHTML = h;
 }
 function sideCalNav(delta){
