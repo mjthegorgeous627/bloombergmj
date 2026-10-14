@@ -207,6 +207,9 @@ function decorateMemoTd(td, rows){
     cur.forEach(k => { const s = document.createElement('span'); s.className = 'flag-label ' + flagDefs()[k].cls; s.textContent = flagDefs()[k].label; box.appendChild(s); });
     td.insertBefore(box, td.firstChild);
   }
+  // 빈 메모칸: 안에 편집 불가 요소(⚑ 버튼/라벨)만 있으면 브라우저가 글자 커서를 못 넣어 타이핑이 안 된다
+  // (2026-10-14 ZRX 67110807 사례) -> 커서가 들어갈 빈 줄(<br>)을 하나 둔다. textContent에는 영향 없음.
+  if(!editableText(td)) td.appendChild(document.createElement('br'));
   const btn = document.createElement('button');
   btn.type = 'button'; btn.className = 'flag-btn'; btn.textContent = '⚑'; btn.title = '라벨 지정 (Delayed / 확인필요)';
   btn.contentEditable = 'false'; btn.dataset.noedit = '1';
