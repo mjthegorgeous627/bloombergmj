@@ -185,3 +185,6 @@ body.side-closed .pin-panel{right:56px}
 .board-wrap{margin-top:3px}
 .board-table thead th{top:calc(var(--sticky-top-h,38px) + var(--ff-h,34px));padding-top:6px;padding-bottom:6px}
 .date-banner-row{scroll-margin-top:calc(var(--sticky-top-h,38px) + var(--ff-h,34px) + 30px)}
+
+/* 2026-10-14: 오더번호 아래 줄(OBD/SDSK/ORD)을 맨 윗 오더와 같은 진한 색으로(굵기는 보통) */
+.ord-cell .muted{color:inherit;font-weight:400}
