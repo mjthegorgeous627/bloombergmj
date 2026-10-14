@@ -61,7 +61,7 @@ function openQuickPrint(){
     + '<label>회사명 <i>(한글로 입력)</i><input id="qk_company"></label>'
     + '<label>주소<textarea id="qk_address" rows="3"></textarea></label>'
     + '<div id="qk_sugg" class="quick-sugg"></div>'
-    + '<div class="quick-two"><label>고객명 <i>(“님” 자동)</i><input id="qk_name"></label><label>전화번호<input id="qk_phone"></label></div>'
+    + '<div class="quick-two"><label>고객명<input id="qk_name"></label><label>전화번호<input id="qk_phone"></label></div>'
     + '<label>요청 사항 <i>(예: 5시 전까지 배송해주세요)</i><textarea id="qk_note" rows="2"></textarea></label>'
     + '<div class="quick-actions"><button type="button" class="btn primary" onclick="printQuick()">인쇄</button><button type="button" class="btn" onclick="closeQuickPrint()">닫기</button></div>'
     + '</div><div class="quick-prev"><div class="quick-paper" id="qk_paper"></div></div></div></div>';
