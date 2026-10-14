@@ -448,3 +448,9 @@ body.side-closed .pin-panel{right:56px}
 .pt-x:hover,.pin-tab.arm .pt-x{background:#fee2e2;color:#dc2626}
 .pin-add{border:0;background:none;color:#64748b;font-size:16px;cursor:pointer;padding:0 8px}
 #pinEditor{flex:1;border:0;resize:none;padding:10px 12px;font:12.5px/1.55 "Malgun Gothic",sans-serif;outline:none}
+
+/* 2026-10-14: 모아보기 줄 + 주황 헤더를 함께 고정(스크롤해도 따라옴), 둘 사이 간격 축소 */
+.flag-filter-bar{position:sticky;top:var(--sticky-top-h,38px);z-index:19;padding:3px 16px;box-shadow:0 1px 0 var(--line)}
+.board-wrap{margin-top:3px}
+.board-table thead th{top:calc(var(--sticky-top-h,38px) + var(--ff-h,34px));padding-top:6px;padding-bottom:6px}
+.date-banner-row{scroll-margin-top:calc(var(--sticky-top-h,38px) + var(--ff-h,34px) + 30px)}

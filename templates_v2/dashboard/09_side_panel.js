@@ -329,8 +329,14 @@ function makeCodeIcons(codeLines){
 }
 
 // ---------- 갱신 훅 (renderAll 끝에서 호출) ----------
+function syncFilterBarHeight(){
+  const el = document.getElementById('flagFilterBar');
+  if(el) document.documentElement.style.setProperty('--ff-h', el.offsetHeight + 'px');
+}
+window.addEventListener('resize', syncFilterBarHeight);
 function updateSideViews(){
   updateFlagFilterBar();
+  syncFilterBarHeight();
   renderSideCalendar();
   decorateRowTools();
 }
