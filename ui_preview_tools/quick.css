@@ -30,3 +30,7 @@
 @media print{
   #printArea .qs-sheet{margin:0;page-break-after:avoid}
 }
+
+.quick-ref{border:1px solid #bfdbfe;background:#eff6ff;border-radius:8px;padding:7px 10px}
+.quick-ref b{display:block;font-size:11px;color:#1d4ed8;margin-bottom:3px}
+.quick-ref pre{margin:0;font:12px/1.45 Consolas,"Malgun Gothic",monospace;color:#1e293b;white-space:pre-wrap;word-break:break-word;user-select:text}

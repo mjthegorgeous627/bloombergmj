@@ -17,7 +17,7 @@ function quickDefaults(rows){
   const title = [...counts.entries()].map(([k, n]) => { const [p, t] = k.split('|'); return p + ' ' + n + '개 ' + t; }).join(', ');
   const r0 = rows[0];
   const lines = String(r0.address || '').split('\n').map(s => s.trim()).filter(Boolean);
-  const keep = lines.filter(l => !/cust#/i.test(l));
+  const keep = lines.map(l => l.replace(/\(?\s*cust#[^)]*\)?/gi, '').trim()).filter(Boolean);   // (cust# ...) 부분만 지우고 나머지(예: 2F)는 유지
   return {
     title: title,
     company: keep[0] || '',
@@ -58,6 +58,7 @@ function openQuickPrint(){
   ov.innerHTML = '<div class="quick-modal"><div class="quick-head"><b>퀵 기사님 안내문</b><span>내용을 확인·수정하고 인쇄하세요 (A4 세로)</span><button type="button" class="quick-x" onclick="closeQuickPrint()">×</button></div>'
     + '<div class="quick-body"><div class="quick-form">'
     + '<label>내용 <i>(예: 키보드 1개 배송 / 키보드 1개 회수 · 줄바꿈 가능)</i><textarea id="qk_title" rows="2"></textarea></label>'
+    + '<div class="quick-ref"><b>보드 원문 (영문 주소 · 참고용)</b><pre id="qk_ref"></pre></div>'
     + '<label>회사명 <i>(한글로 입력)</i><input id="qk_company"></label>'
     + '<label>주소<textarea id="qk_address" rows="3"></textarea></label>'
     + '<div id="qk_sugg" class="quick-sugg"></div>'
@@ -71,6 +72,7 @@ function openQuickPrint(){
     e.addEventListener('input', renderQuickPreview);
   });
   ov.addEventListener('mousedown', e => { if(e.target === ov) closeQuickPrint(); });
+  document.getElementById('qk_ref').textContent = String(QUICK_ROWS[0].address || '').trim() || '(주소 없음)';
   renderQuickPreview();
   const en = (QUICK_ROWS[0].address || '').split('\n')[0].trim();
   if(en && /[A-Za-z]/.test(en)){
