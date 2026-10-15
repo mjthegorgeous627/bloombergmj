@@ -650,6 +650,47 @@ def set_cell_highlight(item_id, field, style):
     return {"updated": True}
 
 
+def stack_settled_to_top(new_item_ids):
+    """Server-side twin of the board's stackSettledToTop() (06_persistence.js):
+    rows just marked Done/Ready/Cancel/billed go right under the rows that were
+    already settled in their date section, ahead of the unprocessed rest.
+    The manual Done/Ready buttons do this in the browser; automatic marking
+    (POD success -> run_pod_update's watcher) only set board_status, so those
+    rows stayed in place (2026-10-15 user report, ZRX 67112075)."""
+    new_ids = [int(i) for i in new_item_ids if str(i).strip()]
+    if not new_ids:
+        return {"stacked": 0}
+    settled = {"done", "pending", "cancelled", "billed"}
+    new_set = set(new_ids)
+    with connect() as con:
+        placeholders = ",".join("?" for _ in new_ids)
+        dates = {
+            r["d"] for r in con.execute(
+                f"""SELECT COALESCE(NULLIF(i.item_date, ''), o.source_date) AS d
+                    FROM order_items i JOIN orders o ON o.id = i.order_id
+                    WHERE i.id IN ({placeholders})""", new_ids,
+            ).fetchall()
+        }
+        day_orders = []
+        for iso in dates:
+            rows = con.execute(
+                """
+                SELECT i.id, i.board_status FROM order_items i
+                JOIN orders o ON o.id = i.order_id
+                WHERE i.deleted_at IS NULL
+                  AND COALESCE(NULLIF(i.item_date, ''), o.source_date) = ?
+                ORDER BY (i.board_pos IS NULL), i.board_pos, i.order_id, i.line_no
+                """, (iso,),
+            ).fetchall()
+            prev = [r["id"] for r in rows if r["id"] not in new_set and (r["board_status"] or "") in settled]
+            fresh = [r["id"] for r in rows if r["id"] in new_set and (r["board_status"] or "") in settled]
+            rest = [r["id"] for r in rows if r["id"] not in prev and r["id"] not in fresh]
+            day_orders.append(prev + fresh + rest)
+    for ordered in day_orders:
+        reorder_items(ordered)
+    return {"stacked": len(new_ids)}
+
+
 def reorder_items(item_ids_in_order):
     """Persist a manual row order within one date section. `item_ids_in_order`
     is the FULL ordered list of item ids currently visible in that section

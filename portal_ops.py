@@ -15,7 +15,7 @@ import sys
 import threading
 
 from db import BASE_DIR, add_event, connect, ensure_db, now_text
-from items import set_items_board_status
+from items import set_items_board_status, stack_settled_to_top
 from order_domain import resolve_item_type
 from sap_ops import _run_hidden_with_toast
 
@@ -533,6 +533,11 @@ def run_pod_update(order_ids, signed_by="", dt="", remarks="", pickup_done=False
                 set_items_board_status(delivery_ids, "done")
             if pickup_ids:
                 set_items_board_status(pickup_ids, "pending")
+            # 수동 Done/Ready 버튼처럼 해당 날짜 섹션 맨 위(이미 처리된 행들 아래)로 쌓기
+            try:
+                stack_settled_to_top(delivery_ids + pickup_ids)
+            except Exception:
+                pass
 
     threading.Thread(target=watcher, daemon=True).start()
     return {"started": True, "pid": proc.pid, "podOrderId": primary["id"]}
