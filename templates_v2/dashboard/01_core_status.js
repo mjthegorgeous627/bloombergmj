@@ -72,9 +72,9 @@ function _ticketBtn(text, busy){
 }
 function _closeTicketReport(){ const o=document.getElementById('ticketReportOverlay'); if(o) o.remove(); }
 function _ticketActionText(p){
-  if(p.action==='append_memo') return (p.row_label||('행 '+p.row_id))+' Memo에 추가: '+(p.memo_append||'');
+  if(p.action==='append_memo') return (p.row_label||('행 '+p.row_id))+' Memo에 추가: '+(p.memo_append||'')+'\n+ Order# 아래에 SDSK '+String(p.ticket||'')+' 번호 추가';
   if(p.action==='set_date') return (p.row_label||('행 '+p.row_id))+' 날짜 → '+(p.date||'');
-  if(p.action==='new_row'){ const n=p.new_row||{}; return '새 행: '+[n.customer,n.item,n.date].filter(Boolean).join(' / '); }
+  if(p.action==='new_row'){ const n=p.new_row||{}; return '새 행 만들기 (Order# SDSK '+String(p.ticket||'')+')'+String.fromCharCode(10)+[n.type,n.customer,n.item,n.date].filter(Boolean).join(' / '); }
   return '';
 }
 async function _applyTicketProposal(p, btn, skipBtn){
@@ -92,14 +92,29 @@ function _fmtTicketWhen(iso){
   const m=String(iso||'').match(/(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/); if(!m) return '';
   const h=+m[4]; return (+m[2])+'월 '+(+m[3])+'일 '+(h<12?'오전 ':'오후 ')+(h%12||12)+'시 '+m[5]+'분';
 }
+function _tkDateInput(init, required){
+  // 할 일 날짜: 배송장에 내보낼 때(새 행 날짜/날짜 변경)와 보관함 정렬(날짜 오름차순)에 쓴다
+  const di=document.createElement('input'); di.type='date'; di.title='할 일 날짜 (배송장 날짜 / 보관함 정렬 기준)';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(init||'')) di.value=init;
+  const paint=()=>{ const today=new Date(); const t=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+    di.style.border=(!di.value&&required)?'1px solid #d9534f':(di.value&&di.value<t)?'1px solid #d9822b':''; };
+  di.style.padding='2px 4px'; paint(); di.addEventListener('input',paint);
+  return di;
+}
+function _tkWithDate(b,di){
+  const v=di?di.value:'';
+  if(b.action==='new_row') return Object.assign({},b,{new_row:Object.assign({},b.new_row,{date:v})});
+  if(b.action==='set_date' && v) return Object.assign({},b,{date:v});
+  return b;
+}
 function _tkEl(tag, css, txt){ const e=document.createElement(tag); if(css) e.style.cssText=css; if(txt!=null) e.textContent=txt; return e; }
 function _ticketCards(box, items, opts){
   // 티켓 한 줄(저장소 기록) = 카드 1개. 본 글 = Summary, 안 본 글 = NEW. 글자 14px 한 가지, 굵게는 제목/섹션 이름만.
   opts=opts||{};
-  const accent={'New':'#d9534f','Updated':'#4a6fa5','Closed':'#9aa0a6','Mail':'#4f9a6b'};
+  const accent={'New':'#d9534f','Updated':'#4a6fa5','Closed':'#9aa0a6','Mail':'#4f9a6b','Done':'#6b7b8c','List':'#7a5ea8'};
   const INK='#222', SUB='#7a808a';
   (items||[]).forEach(it=>{
-    const tag=it.tag||'Updated';
+    const tag=opts.archived ? (it.closed?'Closed':'Done') : (it.tag||'Updated');
     const card=_tkEl('div','border:1px solid #e4e6ea;border-left:4px solid '+(accent[tag]||SUB)+';border-radius:8px;padding:12px 16px;margin-bottom:14px;background:#fff;color:'+INK+';font-size:14px;line-height:1.55;font-weight:400');
     card.setAttribute('data-tk','1');
     const head=_tkEl('div','font-weight:700;margin-bottom:2px');
@@ -134,41 +149,84 @@ function _ticketCards(box, items, opts){
       nb.appendChild(_tkEl('div','font-weight:700;color:#8a6d1a','NEW'));
       fresh.forEach(p=>nb.appendChild(rowEl(p,false))); card.appendChild(nb);
     }
-    if(it.todo){
-      const none=/^\s*조치 없음/.test(it.todo);
+    const reflected=((it.history||[]).some(x=>x.result==='Memo 반영'))||/배송장에\s*이미\s*반영/.test(it.todo||'');
+    const todoTxt=String(it.todo||'').replace(/\s*[\(（]?\s*배송장에\s*이미\s*반영됨\s*[\)）]?/g,'').trim();
+    if(todoTxt){
+      const none=/^\s*조치 없음/.test(todoTxt);
       const tb=_tkEl('div','margin-top:10px;border-radius:6px;padding:6px 10px;background:'+(none?'#f3f4f6':'#e9f5ee'));
       tb.appendChild(_tkEl('div','font-weight:700;color:'+(none?SUB:'#2e7d4f'),'TO DO'));
-      tb.appendChild(_tkEl('div','white-space:pre-wrap',it.todo)); card.appendChild(tb);
+      tb.appendChild(_tkEl('div','white-space:pre-wrap',todoTxt)); card.appendChild(tb);
     }
     const bar=_tkEl('div','margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap');
-    if(opts.archived){
+    if(opts.watching){
+      const ago=_tkAgo(it.last_checked);
+      const stamp=_tkEl('span','flex:1 1 200px;color:'+(!ago?'#c0392b':ago.days>=7?'#d9822b':SUB),'마지막 확인  '+(ago?(ago.txt+(ago.days>0?'  ('+ago.days+'일 전)':'  (오늘)')):'확인 안 함')+(reflected?'  ·  배송장에 반영함':''));
+      bar.appendChild(stamp);
+      const wdate=_tkDateInput(it.due||it.due_auto||((it.board&&it.board.new_row&&it.board.new_row.date)||''), false);
+      wdate.onchange=async()=>{ try{ const r=await fetch('/api/tickets/due',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key,due:wdate.value})}); const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'실패'); toast(wdate.value?('할 일 날짜 '+wdate.value+' 저장 (다음에 열면 날짜순으로 정렬됩니다)'):'할 일 날짜를 지웠습니다'); }catch(err){ toast('날짜 저장 실패: '+err.message); } };
+      const wwrap=_tkEl('span','display:inline-flex;gap:6px;align-items:center'); wwrap.appendChild(_tkEl('span','color:'+SUB+';font-size:13px','할 일 날짜')); wwrap.appendChild(wdate);
+      if(!it.due&&it.due_auto&&wdate.value===it.due_auto){ const h2=_tkEl('span','color:'+SUB+';font-size:12px','(To do 기준)'); wwrap.appendChild(h2); wdate.addEventListener('input',()=>h2.remove()); }
+      bar.appendChild(wwrap);
+      const ok=document.createElement('button'); ok.className='btn'; ok.textContent='확인함';
+      ok.title='업데이트가 없어도 다시 확인했다는 날짜를 찍습니다';
+      ok.onclick=async()=>{ try{ const r=await fetch('/api/tickets/recheck',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key})}); const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'실패'); const a2=_tkAgo(d.at); stamp.style.color=SUB; stamp.textContent='마지막 확인  '+a2.txt+'  (오늘)'+(reflected?'  ·  배송장에 반영함':''); if(opts.onChange) opts.onChange('stamp'); }catch(err){ toast('저장 실패: '+err.message); } };
+      const rs=document.createElement('button'); rs.className='btn'; rs.textContent='Done';
+      rs.onclick=async()=>{ if(!window.confirm('Done(완료함)으로 옮길까요?\n해결(Resolved)·종료(Closed)되었거나 내가 더 확인하지 않아도 되는 티켓입니다.')) return;
+        try{ const r=await fetch('/api/tickets/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key})}); const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'실패'); card.style.transition='opacity .25s'; card.style.opacity='0'; setTimeout(()=>{ card.remove(); if(opts.onChange) opts.onChange(); },260); }catch(err){ toast('저장 실패: '+err.message); } };
+      const wb=it.board&&it.board.action&&it.board.action!=='none' ? it.board : null;
+      if(wb){
+        const lab={append_memo:'Memo에 반영',set_date:'날짜 반영',new_row:'새 행 반영'}[wb.action]||'배송장에 반영';
+        const mb=document.createElement('button'); mb.className='btn'; mb.textContent=lab;
+        mb.title='반영 안 됐을 수 있어 다시 반영할 수 있습니다. 같은 줄이 이미 Memo에 있으면 중복으로 넣지 않습니다. '+(wb.row_label||'');
+        mb.onclick=async()=>{ if(wb.action==='new_row'&&!wdate.value){ toast('날짜를 먼저 입력하세요'); wdate.focus(); return; } if(await _applyTicketProposal(Object.assign({ticket:it.key},_tkWithDate(wb,wdate)),mb,mb)){ try{ const r=await fetch('/api/tickets/recheck',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key,result:'Memo 반영'})}); const d=await r.json(); const a3=_tkAgo(d.at); stamp.style.color=SUB; stamp.textContent='마지막 확인  '+a3.txt+'  (오늘)  ·  배송장에 반영함'; mb.disabled=false; }catch(e){} } };
+        bar.appendChild(mb);
+      }
+      bar.appendChild(ok); bar.appendChild(rs);
+    } else if(opts.archived){
       const h=(it.history||[]).map(x=>String(x.at||'').replace('T',' ').slice(5,16)+' '+x.result).join('  ·  ');
       bar.appendChild(_tkEl('span','color:'+SUB,'처리 이력: '+(h||'-')));
     } else {
       const b=it.board&&it.board.action&&it.board.action!=='none' ? it.board : null;
-      bar.appendChild(_tkEl('span','flex:1 1 200px',b?('배송장에 반영: '+String(b.question||'').replace(/\s*(하겠습니까|할까요)\?/,'')+(b.row_label?('  ('+b.row_label+')'):'')):''));
-      const done=async(result)=>{
+      bar.appendChild(_tkEl('span','flex:1 1 200px',(!b&&reflected)?'배송장에 반영함':b?('배송장에 반영: '+String(b.question||'').replace(/\s*(하겠습니까|할까요)\?/,'')+(b.row_label?('  ('+b.row_label+')'):'')):''));
+      const initD=it.due||it.due_auto||(b&&((b.new_row&&b.new_row.date)||(b.action==='set_date'&&b.date)))||'';
+      const dateIn=_tkDateInput(initD, !!(b&&b.action==='new_row'));
+      const lab0=_tkEl('span','color:'+SUB+';font-size:13px','할 일 날짜'); const dwrap=_tkEl('span','display:inline-flex;gap:6px;align-items:center'); dwrap.appendChild(lab0); dwrap.appendChild(dateIn);
+      if(!it.due&&it.due_auto&&dateIn.value===it.due_auto){ const hint=_tkEl('span','color:'+SUB+';font-size:12px','(To do 기준)'); dwrap.appendChild(hint); dateIn.addEventListener('input',()=>hint.remove()); }
+      bar.appendChild(dwrap);
+      const done=async(result,to)=>{
         try{
-          const r=await fetch('/api/tickets/handle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key,result})});
-          const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'보관 실패');
+          const r=await fetch('/api/tickets/handle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key,result,to,due:(dateIn&&dateIn.value)||''})});
+          const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'이동 실패');
           card.style.transition='opacity .25s'; card.style.opacity='0';
           setTimeout(()=>{ card.remove(); if(opts.onChange) opts.onChange(); },260);
-        }catch(err){ toast('보관 실패: '+err.message); }
+        }catch(err){ toast('이동 실패: '+err.message); }
       };
+      const btn=(label,title)=>{ const x=document.createElement('button'); x.className='btn'; x.textContent=label; if(title) x.title=title; return x; };
       if(b){
-        const ok=document.createElement('button'); ok.className='btn'; ok.textContent='예, 업데이트';
-        const sk=document.createElement('button'); sk.className='btn'; sk.textContent='건너뛰기';
-        ok.onclick=async()=>{ if(await _applyTicketProposal(Object.assign({ticket:it.key},b),ok,sk)) done('업데이트'); };
-        sk.onclick=()=>done('건너뜀');
-        bar.appendChild(ok); bar.appendChild(sk);
-      } else {
-        const ok=document.createElement('button'); ok.className='btn'; ok.textContent='확인';
-        ok.onclick=()=>done('확인'); bar.appendChild(ok);
+        const lab={append_memo:'Memo에 반영',set_date:'날짜 반영',new_row:'새 행 반영'}[b.action]||'배송장에 반영';
+        const ok=btn(lab,'배송장에 반영한 뒤 보관함으로 옮깁니다');
+        ok.onclick=async()=>{ if(b.action==='new_row'&&!dateIn.value){ toast('날짜를 먼저 입력하세요'); dateIn.focus(); return; } if(await _applyTicketProposal(Object.assign({ticket:it.key},_tkWithDate(b,dateIn)),ok,ok)) done('Memo 반영','watching'); };
+        bar.appendChild(ok);
       }
+      const bo=btn('보관함','배송장 반영 없이 보관함으로 옮깁니다. 해결될 때까지 중간중간 다시 확인할 티켓');
+      bo.onclick=()=>done('보관함','watching'); bar.appendChild(bo);
+      const dn=btn('Done','완료함으로 옮깁니다. 해결(Resolved)·종료(Closed)됐거나 나와 상관없는 티켓');
+      dn.onclick=()=>done('Done','done'); bar.appendChild(dn);
     }
     card.appendChild(bar);
     box.appendChild(card);
   });
+}
+function _tkOpenTicket(num){
+  return fetch('/api/tickets/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number:num})})
+    .then(r=>r.json().then(d=>{ if(!r.ok||d.error) throw new Error(d.error||'실패'); toast(d.message); }))
+    .catch(err=>toast('티켓 열기 실패: '+err.message));
+}
+function _tkAgo(iso){
+  if(!iso) return null;
+  const d=new Date(iso); if(isNaN(d)) return null;
+  const days=Math.floor((Date.now()-d.getTime())/86400000);
+  return {txt:(d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'), days};
 }
 function _openTicketReport(when){
   _closeTicketReport();
@@ -177,39 +235,81 @@ function _openTicketReport(when){
   o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
   o.onclick=(e)=>{ if(e.target===o) _closeTicketReport(); };
   const box=document.createElement('div');
-  box.style.cssText='background:#fff;color:#222;max-width:820px;width:92%;max-height:86vh;overflow:auto;border-radius:10px;padding:16px 20px;box-shadow:0 8px 30px rgba(0,0,0,.3)';
+  box.style.cssText='font-size:14px;background:#fff;color:#222;width:min(860px,94vw);height:min(82vh,820px);display:flex;flex-direction:column;overflow:hidden;border-radius:10px;padding:16px 20px;box-shadow:0 8px 30px rgba(0,0,0,.3)';
   const head=document.createElement('div');
-  head.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px';
-  const ttl=document.createElement('b'); ttl.style.fontSize='15px'; head.appendChild(ttl);
-  const tog=document.createElement('button'); tog.className='btn'; tog.style.marginLeft='auto'; head.appendChild(tog);
+  head.style.cssText='flex:none;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap';
+  const tabs=document.createElement('div'); tabs.style.cssText='display:flex;gap:6px';
+  const mk=(id,label)=>{ const t=document.createElement('button'); t.className='btn'; t.textContent=label; t.dataset.tab=id; tabs.appendChild(t); return t; };
+  const tPend=mk('pending','처리할 것'), tWatch=mk('watch','보관함'), tArch=mk('archive','완료함');
+  head.appendChild(tabs);
+  const info=document.createElement('span'); info.style.cssText='color:#7a808a;margin-left:auto'; head.appendChild(info);
   const x=document.createElement('button'); x.textContent='닫기'; x.className='btn'; x.onclick=_closeTicketReport; head.appendChild(x);
   box.appendChild(head);
-  const search=document.createElement('input'); search.placeholder='보관함 검색 (SDSK 번호, 이름, 내용)';
-  search.style.cssText='display:none;width:100%;box-sizing:border-box;margin-bottom:10px;padding:6px 8px'; box.appendChild(search);
-  const list=document.createElement('div'); box.appendChild(list);
+  const search=document.createElement('input'); search.placeholder='검색 (SDSK 번호, 이름, 내용)';
+  search.style.cssText='flex:none;display:none;width:100%;box-sizing:border-box;margin-bottom:10px;padding:6px 8px'; box.appendChild(search);
+  const list=document.createElement('div'); list.style.cssText='flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:4px'; box.appendChild(list);
   let mode='pending';
-  const whenTxt=()=>(when?('  ·  마지막 조회 '+_fmtTicketWhen(when)):'');
+  const setActive=()=>{ [tPend,tWatch,tArch].forEach(t=>{ const on=t.dataset.tab===mode; t.style.fontWeight=on?'800':'400'; t.style.background=on?'#e9eef7':''; t.style.borderColor=on?'#4a6fa5':''; }); };
+  const whenTxt=()=>(when?('마지막 조회 '+_fmtTicketWhen(when)):'');
   async function showPending(){
-    mode='pending'; search.style.display='none'; list.innerHTML='';
+    mode='pending'; setActive(); search.style.display='none'; list.innerHTML='';
     const d=await (await fetch('/api/tickets/pending')).json();
     const upd=()=>{
-      const n=list.querySelectorAll('[data-tk]').length;
-      ttl.textContent='처리할 것 '+n+'건'+whenTxt();
+      const n=list.querySelectorAll('[data-tk]').length; info.textContent='처리할 것 '+n+'건  ·  '+whenTxt();
+      tPend.textContent='처리할 것 '+n;
       if(!n && !list.querySelector('.tk-empty')){ const e=_tkEl('div','color:#7a808a;padding:20px 0;text-align:center','처리할 것이 없습니다.'); e.className='tk-empty'; list.appendChild(e); }
     };
-    _ticketCards(list, d.cards||[], {onChange:upd}); upd(); tog.textContent='보관함 보기';
+    _ticketCards(list, d.cards||[], {onChange:upd}); upd();
+  }
+  async function showWatch(){
+    mode='watch'; setActive(); search.style.display='none'; list.innerHTML='';
+    const d=await (await fetch('/api/tickets/watching')).json();
+    const upd=()=>{
+      const n=list.querySelectorAll('[data-tk]').length; tWatch.textContent='보관함 '+n;
+      info.textContent='보관함 '+n+'건  ·  할 일 날짜가 빠른 순서 (날짜 직접 입력 > To do의 날짜, 없으면 맨 아래)';
+      if(!n && !list.querySelector('.tk-empty')){ const e=_tkEl('div','color:#7a808a;padding:20px 0;text-align:center','보관함이 비어 있습니다. 처리할 것에서 [보관함]을 누르면 여기로 옵니다.'); e.className='tk-empty'; list.appendChild(e); }
+    };
+    _ticketCards(list, d.cards||[], {watching:true, onChange:(w)=>{ if(w!=='stamp') upd(); }}); upd();
   }
   async function showArchive(){
-    mode='archive'; search.style.display='block'; list.innerHTML='';
+    mode='archive'; setActive(); search.style.display='block'; list.innerHTML='';
     const d=await (await fetch('/api/tickets/archive?q='+encodeURIComponent(search.value||''))).json();
-    ttl.textContent='보관함 (티켓 '+d.total+'개)'; tog.textContent='처리할 것 보기';
+    info.textContent='완료함 (티켓 '+d.total+'개)  ·  해결·종료되었거나 나와 상관없는 티켓';
     _ticketCards(list, d.items||[], {archived:true});
-    if(!(d.items||[]).length) list.appendChild(_tkEl('div','color:#7a808a;padding:20px 0;text-align:center','보관된 것이 없습니다.'));
+    if(!(d.items||[]).length) list.appendChild(_tkEl('div','color:#7a808a;padding:20px 0;text-align:center','완료함이 비어 있습니다.'));
   }
-  tog.onclick=()=>{ if(mode==='pending') showArchive(); else showPending(); };
-  let tmr=null; search.oninput=()=>{ clearTimeout(tmr); tmr=setTimeout(showArchive,300); };
+  tPend.onclick=()=>showPending(); tWatch.onclick=()=>showWatch(); tArch.onclick=()=>showArchive();
+  let tmr=null; search.oninput=()=>{ clearTimeout(tmr); tmr=setTimeout(()=>{ showArchive(); },250); };
   o.appendChild(box); document.body.appendChild(o);
+  window._tkRefreshPending=()=>{ if(document.getElementById('ticketReportOverlay')) showPending().catch(()=>{}); };
   showPending().catch(err=>toast('불러오기 실패: '+err.message));
+  // 탭 이름에 건수 미리 표시
+  fetch('/api/tickets/watching').then(r=>r.json()).then(d=>{ tWatch.textContent='보관함 '+(d.cards||[]).length; }).catch(()=>{});
+}
+let _tkIntakeTimer=null;
+async function startTicketIntake(){
+  // 사이드바 '번호로 읽기': SDSK 숫자 / 숫자만, 여러 개는 쉼표·공백·줄바꿈
+  const inp=document.getElementById('ticketNumInput'), btn=document.getElementById('ticketNumBtn'), msg=document.getElementById('ticketIntakeMsg');
+  const nums=(inp.value.match(/\d{8,12}/g)||[]).filter((v,i,a)=>a.indexOf(v)===i);
+  if(!nums.length){ toast('티켓 번호를 찾지 못했습니다. 예: SDSK 1339513698 또는 1339513698'); inp.focus(); return; }
+  if(!window.confirm('다음 티켓을 터미널에서 읽습니다 (티켓당 1~2분):\n\n'+nums.map(n=>'SDSK '+n).join('\n')+'\n\n읽는 동안 마우스·키보드를 건드리지 마세요. 시작할까요?')) return;
+  try{
+    const r=await fetch('/api/tickets/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({numbers:nums.join(',')})});
+    const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'시작 실패');
+    if(!d.started){ toast(d.message); return; }
+  }catch(err){ toast('시작 실패: '+err.message); return; }
+  btn.disabled=true; inp.disabled=true; msg.style.display='block'; msg.textContent='읽는 중… (SDSK '+nums.join(', ')+')';
+  const t0=Date.now(); clearInterval(_tkIntakeTimer);
+  _tkIntakeTimer=setInterval(async()=>{
+    try{
+      const st=await (await fetch('/api/tickets/status')).json();
+      const sec=Math.round((Date.now()-t0)/1000);
+      if(st.state==='waiting'||st.state==='running'){ msg.textContent='읽는 중… '+sec+'초 (SDSK '+nums.join(', ')+') 마우스·키보드를 건드리지 마세요'; return; }
+      clearInterval(_tkIntakeTimer); btn.disabled=false; inp.disabled=false;
+      if(st.state==='done'){ msg.textContent='완료 · '+(st.message||'')+' — [티켓 결과]에서 확인'; inp.value=''; toast('티켓 읽기 완료 - 티켓 결과 > 처리할 것에 올렸습니다'); if(window._tkRefreshPending) window._tkRefreshPending(); }
+      else { msg.textContent='실패 · '+(st.message||''); toast('티켓 읽기 실패: '+(st.message||'')); }
+    }catch(e){ /* 서버 재시작 중 등 - 다음 주기에 재시도 */ }
+  },3000);
 }
 async function showTicketReport(){
   try{

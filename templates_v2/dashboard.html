@@ -129,6 +129,8 @@
     <div class="side-sec tools">
       <h4>Bloomberg Terminal</h4>
       <div class="srow"><button class="btn block" id="ticketCheckBtn" onclick="runTicketCheck()" title="블룸버그 터미널 수신함의 새 SDSK 티켓/업데이트를 Claude가 읽고, 배송장에 무엇을 바꿔야 하는지 제안을 만듭니다(보드는 수정하지 않음). 읽는 동안 SAP 자동루프는 잠깐 대기하고, 마우스·키보드를 건드리면 안 됩니다.">티켓 확인</button><button class="btn block" id="ticketReportBtn" onclick="showTicketReport()" title="마지막 티켓 확인 결과 보기">티켓 결과</button></div>
+      <div class="srow"><input id="ticketNumInput" placeholder="티켓 번호 (SDSK 1339513698)" onkeydown="if(event.key==='Enter'){event.preventDefault();startTicketIntake();}" style="min-width:0;padding:4px 6px;font-size:11px" title="SDSK 숫자 또는 숫자만 입력. 여러 개는 쉼표·공백으로 구분"><button class="btn block" id="ticketNumBtn" onclick="startTicketIntake()" title="입력한 티켓을 터미널에서 열어 읽고 '티켓 결과 > 처리할 것'에 올립니다 (티켓당 1~2분)">번호로 읽기</button></div>
+      <div id="ticketIntakeMsg" style="display:none;font-size:11px;color:#64748b;line-height:1.35;margin-bottom:4px"></div>
     </div>
     <div class="side-sec tools">
       <h4>Bloomberg Portal</h4>

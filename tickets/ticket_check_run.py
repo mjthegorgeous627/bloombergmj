@@ -25,7 +25,7 @@ STATUS = os.path.join(RUNS, "status.json")
 REPORT = os.path.join(RUNS, "latest_report.md")
 CLAUDE_EXE = os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
 IMG_DIR = r"C:\1\티켓관리"
-MAX_SECONDS = 15 * 60
+MAX_SECONDS = 30 * 60
 ALLOWED = ["Read", "Bash(python -X utf8 tickets/ticket_tools.py:*)"]
 
 
@@ -49,6 +49,7 @@ def current_status():
 
 def main():
     started = datetime.now().isoformat(timespec="seconds")
+    forced = []                       # 사용자가 번호로 직접 지정한 티켓(처리했던 것이어도 다시 '처리할 것'으로 올린다)
     set_status("waiting", "SAP 자동루프 사이클이 끝나기를 기다리는 중", started=started)
     try:
         with TerminalGate("티켓 확인") as gate:
@@ -78,10 +79,12 @@ def main():
                         nums = [x for x in ff.read().replace(",", " ").split() if x.isdigit()]
                     os.remove(fp)
                     if nums:
+                        forced.extend(nums)
                         NL = chr(10)
                         prompt += (NL * 2 + "## 이번 실행의 추가 지시(1회)" + NL
-                                   + "안 읽은 줄 판단 대신, 다음 SDSK 티켓들을 읽음 여부와 상관없이 모두 `open`으로 열고 "
-                                   "`read`로 본문 전체(#1 글 포함)를 읽어 정리한다. 티켓 번호: " + ", ".join(nums)
+                                   + "사용자가 아래 SDSK 티켓 번호를 직접 지정했다. 수신함은 보지 않고, '이미 아는 티켓' 표의 '열지 않는다' 규칙은 이번에는 무시한다. "
+                                   "각 번호마다 `read <번호>`로 본문 전체(#1 글 포함)를 읽어 정리한다(번호로 직접 들어가며 `open`은 쓰지 않는다). "
+                                   "이미 아는 티켓이어도 이번에는 #1 정리글과 흐름 이해에 필요한 글, 알아야 할 정보를 모두 posts에 넣고, 이전에 본 글은 new:false, 이번에 새로 알게 된 최신 글만 new:true로 한다. 티켓 번호: " + ", ".join(nums)
                                    + ". 일반 메일은 이번에는 열지 않는다." + NL)
                 cmd = [CLAUDE_EXE, "-p", "--permission-mode", "dontAsk", "--output-format", "text",
                        "--add-dir", IMG_DIR, "--allowedTools"] + ALLOWED
@@ -100,6 +103,7 @@ def main():
         name = f"report_{datetime.now():%Y%m%d_%H%M%S}.md"
         try:
             stats = ticket_store.ingest(ticket_store.extract_json(out), name)
+            ticket_store.force_pending(forced)
         except Exception as e:
             raise RuntimeError(f"결과를 저장소에 넣지 못했습니다(원문은 latest_report.md): {e}")
         set_status("done", f"완료 (새 티켓 {stats['new']} / 업데이트 {stats['updated']} / 변화 없음 {stats['unchanged']})",

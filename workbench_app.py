@@ -227,6 +227,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/tickets/pending":
                 self.send_json(ticket_ops.ticket_pending())
                 return
+            if parsed.path == "/api/tickets/watching":
+                self.send_json(ticket_ops.ticket_watching())
+                return
             if parsed.path == "/api/tickets/archive":
                 qs = parse_qs(parsed.query)
                 self.send_json(ticket_ops.ticket_archive_list((qs.get("q") or [""])[0]))
@@ -360,10 +363,30 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/undo":
                 self.send_json(undo_last_action())
                 return
+            if parsed.path == "/api/tickets/due":
+                try:
+                    b = self.read_json()
+                    self.send_json(ticket_ops.ticket_set_due(b.get("key"), b.get("due")))
+                except Exception as e:
+                    self.send_json({"error": str(e)}, 400)
+                return
+            if parsed.path == "/api/tickets/recheck":
+                try:
+                    b = self.read_json()
+                    self.send_json(ticket_ops.ticket_recheck(b.get("key"), b.get("result")))
+                except Exception as e:
+                    self.send_json({"error": str(e)}, 400)
+                return
+            if parsed.path == "/api/tickets/resolve":
+                try:
+                    self.send_json(ticket_ops.ticket_resolve(self.read_json().get("key")))
+                except Exception as e:
+                    self.send_json({"error": str(e)}, 400)
+                return
             if parsed.path == "/api/tickets/handle":
                 try:
                     b = self.read_json()
-                    self.send_json(ticket_ops.ticket_handle(b.get("key"), b.get("result") or ""))
+                    self.send_json(ticket_ops.ticket_handle(b.get("key"), b.get("result") or "", b.get("to"), b.get("due")))
                 except Exception as e:
                     self.send_json({"error": str(e)}, 400)
                 return
@@ -380,7 +403,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": str(e)}, 400)
                 return
             if parsed.path == "/api/tickets/check":
-                self.send_json(ticket_ops.ticket_check_start())
+                try:
+                    cb = self.read_json()
+                except Exception:
+                    cb = {}
+                self.send_json(ticket_ops.ticket_check_start((cb or {}).get("numbers")))
                 return
             if parsed.path == "/api/sap/start_loop":
                 self.send_json(sap_start_loop())

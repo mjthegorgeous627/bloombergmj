@@ -92,17 +92,17 @@ def cmd_board(q):
     c = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     like = f"%{q}%"
     rows = c.execute(
-        """select o.id, o.order_no, o.order_type, o.customer, o.phone, o.memo,
+        """select o.id, o.order_no, o.order_type, o.customer, o.phone, o.memo, o.extra_codes, o.delivery_no,
                   i.item_date, i.board_status, i.description, i.material, i.serial
            from orders o left join order_items i on i.order_id = o.id and i.deleted_at is null
            where o.order_no like ? or o.order_type like ? or o.customer like ? or o.memo like ?
-                 or i.serial like ? or i.description like ?
-           order by o.id desc limit 30""", (like,) * 6).fetchall()
+                 or i.serial like ? or i.description like ? or o.extra_codes like ? or o.delivery_no like ?
+           order by o.id desc limit 30""", (like,) * 8).fetchall()
     if not rows:
         print("(보드에 일치하는 행 없음)")
     for r in rows:
-        print(f"id={r[0]} order_no={r[1]!r} type={r[2]!r} customer={r[3]!r} phone={r[4]!r} date={r[6]} status={r[7]!r}"
-              f" item={r[8]!r} M/N={r[9]!r} S/N={r[10]!r}\n    memo={r[5]!r}")
+        print(f"id={r[0]} order_no={r[1]!r} type={r[2]!r} customer={r[3]!r} phone={r[4]!r} date={r[8]} status={r[9]!r}"
+              f" item={r[10]!r} M/N={r[11]!r} S/N={r[12]!r}" + NL + f"    Order# 아래 코드: OBD={r[7]!r} / {r[6]!r}" + NL + f"    memo={r[5]!r}")
 
 
 if __name__ == "__main__":
