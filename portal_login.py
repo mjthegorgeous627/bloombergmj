@@ -403,30 +403,48 @@ def _is_logged_out(url):
     return "/supplier/login" in url or "bsso.blpprofessional.com" in url
 
 
-def _cdp_connect(pw, open_if_needed=True):
-    try:
-        return pw.chromium.connect_over_cdp("http://localhost:9222", timeout=5000)
-    except Exception:
-        if not open_if_needed:
-            return None
+def _cdp_connect(pw):
+    """Connect to the automation Chrome. Only launches Chrome when it is
+    really not running: a slow/transient connect failure used to be taken as
+    "not running" and opened a SECOND Chrome window with its own SSO login
+    (2026-10-15 user report: two login windows popped up, then a B-Unit
+    prompt). So retry a few times first; the Chrome that open_portal_login()
+    starts already sits on the SSO page, and the caller reuses that tab."""
+    for attempt in range(3):
+        try:
+            return pw.chromium.connect_over_cdp("http://localhost:9222", timeout=5000), False
+        except Exception:
+            time.sleep(2)
     open_portal_login()
-    deadline = time.time() + 25
+    deadline = time.time() + 30
     while time.time() < deadline:
         time.sleep(1)
         try:
-            return pw.chromium.connect_over_cdp("http://localhost:9222", timeout=5000)
+            return pw.chromium.connect_over_cdp("http://localhost:9222", timeout=5000), True
         except Exception:
             pass
-    return None
+    return None, True
+
+
+def _wait_bunit_if_shown(page):
+    """B-Unit prompt: never click/retry anything - just wait passively (up to
+    3 min) for the user to approve it."""
+    try:
+        if "Authenticate to Continue" in page.locator("body").inner_text(timeout=3000):
+            print("B-Unit 인증 화면입니다 - 직접 승인해 주세요 (최대 3분 대기).", flush=True)
+            page.wait_for_url(lambda u: "bsp.btogo.com" in u, timeout=180000)
+    except Exception:
+        pass
 
 
 def preflight_login():
     """Called first by every Portal flow (Serial/QR, POD, spare shipping):
     if the automation Chrome is logged out, log in (SSO link + Next) BEFORE
     the real work starts, instead of failing mid-flow on an expired session.
-    Opens Chrome if it isn't running. Uses its own temporary tab so no
-    in-progress tab is disturbed. Returns True when logged in; False when it
-    could not (e.g. B-Unit approval pending) - callers go on and let their own
+    Opens Chrome only if it is really not running, and never adds a second
+    login page: an SSO tab that is already open (e.g. the one a fresh Chrome
+    launch opens) is reused. Returns True when logged in; False when it could
+    not (e.g. B-Unit approval pending) - callers go on and let their own
     session checks report the specific error."""
     try:
         from playwright.sync_api import sync_playwright
@@ -435,11 +453,23 @@ def preflight_login():
     with portal_browser_lock("login_preflight"):
         pw = sync_playwright().start()
         try:
-            browser = _cdp_connect(pw)
+            browser, launched = _cdp_connect(pw)
             if browser is None or not browser.contexts:
                 print("Portal Chrome에 연결하지 못했습니다.", flush=True)
                 return False
             context = browser.contexts[0]
+
+            # An SSO tab already open (fresh launch, or left over): reuse it.
+            sso_page = next((pg for pg in context.pages if "startSSO.ping?PartnerSpId" in (pg.url or "")), None)
+            if sso_page is None and launched:
+                time.sleep(3)
+                sso_page = next((pg for pg in context.pages if "bsso.blpprofessional.com" in (pg.url or "")), None)
+            if sso_page is not None:
+                print("열려 있는 로그인 화면에서 Next를 누릅니다.", flush=True)
+                click_sso_next(sso_page)
+                _wait_bunit_if_shown(sso_page)
+                return not _is_logged_out(sso_page.url)
+
             had_other_tabs = bool(context.pages)
             page = context.new_page()
             try:
@@ -451,19 +481,13 @@ def preflight_login():
                 if not _is_logged_out(page.url):
                     return True
                 print("Portal 로그인이 풀려 있어 먼저 로그인합니다.", flush=True)
-                try:
-                    page.goto(PORTAL_SSO_URL, wait_until="domcontentloaded", timeout=30000)
-                except Exception:
-                    pass
+                if "startSSO.ping?PartnerSpId" not in (page.url or ""):
+                    try:
+                        page.goto(PORTAL_SSO_URL, wait_until="domcontentloaded", timeout=30000)
+                    except Exception:
+                        pass
                 click_sso_next(page)
-                # B-Unit prompt: never click/retry anything - just wait
-                # (passively, up to 3 min) for the user to approve it.
-                try:
-                    if "Authenticate to Continue" in page.locator("body").inner_text(timeout=3000):
-                        print("B-Unit 인증 화면입니다 - 직접 승인해 주세요 (최대 3분 대기).", flush=True)
-                        page.wait_for_url(lambda u: "bsp.btogo.com" in u, timeout=180000)
-                except Exception:
-                    pass
+                _wait_bunit_if_shown(page)
                 try:
                     page.goto(PROTECTED_URL, wait_until="domcontentloaded", timeout=30000)
                     page.wait_for_timeout(1500)
