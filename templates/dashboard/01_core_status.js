@@ -63,6 +63,61 @@ async function runMorningRoutine(){
     toast('아침 루틴 실행 실패: '+err.message);
   }
 }
+// 2026-10-15: 티켓 확인 - 서버가 숨김 프로세스로 Claude를 띄워 수신함을 읽고 "보드 반영 제안"을 만든다(보드는 수정 안 함).
+let _ticketPoll=null;
+function _ticketBtn(text, busy){
+  const b=document.getElementById('ticketCheckBtn');
+  if(!b) return;
+  b.textContent=text; b.disabled=!!busy;
+}
+function _closeTicketReport(){ const o=document.getElementById('ticketReportOverlay'); if(o) o.remove(); }
+function _openTicketReport(text){
+  _closeTicketReport();
+  const o=document.createElement('div');
+  o.id='ticketReportOverlay';
+  o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  o.onclick=(e)=>{ if(e.target===o) _closeTicketReport(); };
+  const box=document.createElement('div');
+  box.style.cssText='background:#fff;color:#111;max-width:900px;width:92%;max-height:86vh;overflow:auto;border-radius:10px;padding:18px 22px;box-shadow:0 8px 30px rgba(0,0,0,.3)';
+  const head=document.createElement('div');
+  head.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px';
+  head.innerHTML='<b style="font-size:16px">티켓 확인 결과 (제안만 - 보드는 바뀌지 않았습니다)</b>';
+  const x=document.createElement('button'); x.textContent='닫기'; x.className='btn'; x.onclick=_closeTicketReport;
+  head.appendChild(x);
+  const pre=document.createElement('pre');
+  pre.style.cssText='white-space:pre-wrap;word-break:break-word;font:13px/1.55 inherit;margin:0';
+  pre.textContent=text;
+  box.appendChild(head); box.appendChild(pre); o.appendChild(box); document.body.appendChild(o);
+}
+async function showTicketReport(){
+  try{
+    const st=await (await fetch('/api/tickets/status')).json();
+    if(st.report) _openTicketReport(st.report);
+    else toast('아직 보여줄 티켓 확인 결과가 없습니다 ('+(st.state||'idle')+')');
+  }catch(err){ toast('결과를 불러오지 못했습니다: '+err.message); }
+}
+async function _pollTicketCheck(){
+  try{
+    const st=await (await fetch('/api/tickets/status')).json();
+    if(st.state==='waiting'){ _ticketBtn('티켓 확인 (SAP 사이클 대기중…)', true); return; }
+    if(st.state==='running'){ _ticketBtn('티켓 확인 중… (PC 만지지 마세요)', true); return; }
+    clearInterval(_ticketPoll); _ticketPoll=null; _ticketBtn('티켓 확인', false);
+    if(st.state==='done'){ toast('티켓 확인 완료 - 결과를 엽니다'); if(st.report) _openTicketReport(st.report); }
+    else if(st.state==='error'){ toast('티켓 확인 실패: '+(st.message||'')); }
+  }catch(err){ /* 서버 재시작 중 등 - 다음 폴링에서 재시도 */ }
+}
+async function runTicketCheck(){
+  if(!window.confirm('블룸버그 터미널에서 새 티켓을 읽습니다 (보통 2~5분).\n\n- 읽는 동안 마우스·키보드를 건드리지 마세요.\n- SAP 자동루프는 이 동안 잠깐 대기합니다.\n- 보드는 바뀌지 않고, 반영 제안만 만들어집니다.\n\n시작할까요?')) return;
+  try{
+    const res=await fetch('/api/tickets/check', {method:'POST'});
+    const data=await res.json();
+    if(!res.ok || data.error) throw new Error(data.error||'시작 실패');
+    if(!data.started){ toast(data.message); return; }
+    _ticketBtn('티켓 확인 (시작 중…)', true);
+    if(_ticketPoll) clearInterval(_ticketPoll);
+    _ticketPoll=setInterval(_pollTicketCheck, 3000);
+  }catch(err){ toast('티켓 확인 시작 실패: '+err.message); }
+}
 async function runSap(kind){
   try{
     if(kind==='start'){

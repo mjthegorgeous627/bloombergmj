@@ -63,6 +63,183 @@ async function runMorningRoutine(){
     toast('아침 루틴 실행 실패: '+err.message);
   }
 }
+// 2026-10-15: 티켓 확인 - 서버가 숨김 프로세스로 Claude를 띄워 수신함을 읽고 "보드 반영 제안"을 만든다(보드는 수정 안 함).
+let _ticketPoll=null;
+function _ticketBtn(text, busy){
+  const b=document.getElementById('ticketCheckBtn');
+  if(!b) return;
+  b.textContent=text; b.disabled=!!busy;
+}
+function _closeTicketReport(){ const o=document.getElementById('ticketReportOverlay'); if(o) o.remove(); }
+function _ticketActionText(p){
+  if(p.action==='append_memo') return (p.row_label||('행 '+p.row_id))+' Memo에 추가: '+(p.memo_append||'');
+  if(p.action==='set_date') return (p.row_label||('행 '+p.row_id))+' 날짜 → '+(p.date||'');
+  if(p.action==='new_row'){ const n=p.new_row||{}; return '새 행: '+[n.customer,n.item,n.date].filter(Boolean).join(' / '); }
+  return '';
+}
+async function _applyTicketProposal(p, btn, skipBtn){
+  if(!window.confirm('배송장에 반영할까요?\n\n'+_ticketActionText(p)+'\n\n(Ctrl+Z로 되돌릴 수 있습니다)')) return false;
+  btn.disabled=true;
+  try{
+    const res=await fetch('/api/tickets/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({proposal:p})});
+    const data=await res.json();
+    if(!res.ok||data.error) throw new Error(data.error||'실패');
+    toast(data.message);
+    return true;
+  }catch(err){ btn.disabled=false; toast('적용 실패: '+err.message); return false; }
+}
+function _fmtTicketWhen(iso){
+  const m=String(iso||'').match(/(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/); if(!m) return '';
+  const h=+m[4]; return (+m[2])+'월 '+(+m[3])+'일 '+(h<12?'오전 ':'오후 ')+(h%12||12)+'시 '+m[5]+'분';
+}
+function _tkEl(tag, css, txt){ const e=document.createElement(tag); if(css) e.style.cssText=css; if(txt!=null) e.textContent=txt; return e; }
+function _ticketCards(box, items, opts){
+  // 티켓 한 줄(저장소 기록) = 카드 1개. 본 글 = Summary, 안 본 글 = NEW. 글자 14px 한 가지, 굵게는 제목/섹션 이름만.
+  opts=opts||{};
+  const accent={'New':'#d9534f','Updated':'#4a6fa5','Closed':'#9aa0a6','Mail':'#4f9a6b'};
+  const INK='#222', SUB='#7a808a';
+  (items||[]).forEach(it=>{
+    const tag=it.tag||'Updated';
+    const card=_tkEl('div','border:1px solid #e4e6ea;border-left:4px solid '+(accent[tag]||SUB)+';border-radius:8px;padding:12px 16px;margin-bottom:14px;background:#fff;color:'+INK+';font-size:14px;line-height:1.55;font-weight:400');
+    card.setAttribute('data-tk','1');
+    const head=_tkEl('div','font-weight:700;margin-bottom:2px');
+    head.appendChild(_tkEl('span','display:inline-block;background:'+(accent[tag]||SUB)+';color:#fff;border-radius:4px;padding:1px 9px;margin-right:10px;font-size:12.5px;font-weight:700;letter-spacing:.2px;vertical-align:1px',tag));
+    if(it.kind==='SDSK'){
+      const a=_tkEl('a','color:#1a56b0;text-decoration:underline;cursor:pointer;margin-right:8px','SDSK '+it.key);
+      a.title='클릭하면 터미널에서 이 티켓을 엽니다';
+      a.onclick=async(e)=>{ e.preventDefault(); try{ const r=await fetch('/api/tickets/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number:it.key})}); const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'실패'); toast(d.message); }catch(err){ toast('티켓 열기 실패: '+err.message); } };
+      head.appendChild(a);
+    }
+    head.appendChild(document.createTextNode(it.title||''));
+    card.appendChild(head);
+    if(it.srep) card.appendChild(_tkEl('div','color:'+SUB+';margin-bottom:8px',(it.kind==='Mail'?'보낸 사람  ':'담당  ')+it.srep));
+    const posts=it.posts||[];
+    const seen=posts.filter(p=>p.seen||opts.archived), fresh=posts.filter(p=>!p.seen&&!opts.archived);
+    const rowEl=(p,muted)=>{
+      const me=/minjung|^mj$/i.test(p.who||'');
+      const row=_tkEl('div','display:grid;grid-template-columns:34px 82px 1fr 78px;gap:8px;align-items:baseline;padding:3px 0;color:'+(muted?SUB:INK));
+      row.appendChild(_tkEl('span','color:'+SUB,p.n?('#'+p.n):''));
+      row.appendChild(_tkEl('span','',(p.who||'')+(me?' (나)':'')));
+      row.appendChild(_tkEl('span','white-space:pre-wrap;word-break:break-word',p.text||''));
+      row.appendChild(_tkEl('span','color:'+SUB+';text-align:right;white-space:nowrap',p.when||''));
+      return row;
+    };
+    if(seen.length){
+      const d=document.createElement('details'); d.open=seen.length<=3;
+      const sm=_tkEl('summary','cursor:pointer;font-weight:700;color:'+SUB+';margin-top:10px','Summary');
+      d.appendChild(sm); const sw=_tkEl('div','padding:0 10px'); seen.forEach(p=>sw.appendChild(rowEl(p,true))); d.appendChild(sw); card.appendChild(d);
+    }
+    if(fresh.length){
+      const nb=_tkEl('div','margin-top:10px;background:#fff8e1;border-radius:6px;padding:6px 10px');
+      nb.appendChild(_tkEl('div','font-weight:700;color:#8a6d1a','NEW'));
+      fresh.forEach(p=>nb.appendChild(rowEl(p,false))); card.appendChild(nb);
+    }
+    if(it.todo){
+      const none=/^\s*조치 없음/.test(it.todo);
+      const tb=_tkEl('div','margin-top:10px;border-radius:6px;padding:6px 10px;background:'+(none?'#f3f4f6':'#e9f5ee'));
+      tb.appendChild(_tkEl('div','font-weight:700;color:'+(none?SUB:'#2e7d4f'),'TO DO'));
+      tb.appendChild(_tkEl('div','white-space:pre-wrap',it.todo)); card.appendChild(tb);
+    }
+    const bar=_tkEl('div','margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap');
+    if(opts.archived){
+      const h=(it.history||[]).map(x=>String(x.at||'').replace('T',' ').slice(5,16)+' '+x.result).join('  ·  ');
+      bar.appendChild(_tkEl('span','color:'+SUB,'처리 이력: '+(h||'-')));
+    } else {
+      const b=it.board&&it.board.action&&it.board.action!=='none' ? it.board : null;
+      bar.appendChild(_tkEl('span','flex:1 1 200px',b?('배송장에 반영: '+String(b.question||'').replace(/\s*(하겠습니까|할까요)\?/,'')+(b.row_label?('  ('+b.row_label+')'):'')):''));
+      const done=async(result)=>{
+        try{
+          const r=await fetch('/api/tickets/handle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key,result})});
+          const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'보관 실패');
+          card.style.transition='opacity .25s'; card.style.opacity='0';
+          setTimeout(()=>{ card.remove(); if(opts.onChange) opts.onChange(); },260);
+        }catch(err){ toast('보관 실패: '+err.message); }
+      };
+      if(b){
+        const ok=document.createElement('button'); ok.className='btn'; ok.textContent='예, 업데이트';
+        const sk=document.createElement('button'); sk.className='btn'; sk.textContent='건너뛰기';
+        ok.onclick=async()=>{ if(await _applyTicketProposal(Object.assign({ticket:it.key},b),ok,sk)) done('업데이트'); };
+        sk.onclick=()=>done('건너뜀');
+        bar.appendChild(ok); bar.appendChild(sk);
+      } else {
+        const ok=document.createElement('button'); ok.className='btn'; ok.textContent='확인';
+        ok.onclick=()=>done('확인'); bar.appendChild(ok);
+      }
+    }
+    card.appendChild(bar);
+    box.appendChild(card);
+  });
+}
+function _openTicketReport(when){
+  _closeTicketReport();
+  const o=document.createElement('div');
+  o.id='ticketReportOverlay';
+  o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  o.onclick=(e)=>{ if(e.target===o) _closeTicketReport(); };
+  const box=document.createElement('div');
+  box.style.cssText='background:#fff;color:#222;max-width:820px;width:92%;max-height:86vh;overflow:auto;border-radius:10px;padding:16px 20px;box-shadow:0 8px 30px rgba(0,0,0,.3)';
+  const head=document.createElement('div');
+  head.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px';
+  const ttl=document.createElement('b'); ttl.style.fontSize='15px'; head.appendChild(ttl);
+  const tog=document.createElement('button'); tog.className='btn'; tog.style.marginLeft='auto'; head.appendChild(tog);
+  const x=document.createElement('button'); x.textContent='닫기'; x.className='btn'; x.onclick=_closeTicketReport; head.appendChild(x);
+  box.appendChild(head);
+  const search=document.createElement('input'); search.placeholder='보관함 검색 (SDSK 번호, 이름, 내용)';
+  search.style.cssText='display:none;width:100%;box-sizing:border-box;margin-bottom:10px;padding:6px 8px'; box.appendChild(search);
+  const list=document.createElement('div'); box.appendChild(list);
+  let mode='pending';
+  const whenTxt=()=>(when?('  ·  마지막 조회 '+_fmtTicketWhen(when)):'');
+  async function showPending(){
+    mode='pending'; search.style.display='none'; list.innerHTML='';
+    const d=await (await fetch('/api/tickets/pending')).json();
+    const upd=()=>{
+      const n=list.querySelectorAll('[data-tk]').length;
+      ttl.textContent='처리할 것 '+n+'건'+whenTxt();
+      if(!n && !list.querySelector('.tk-empty')){ const e=_tkEl('div','color:#7a808a;padding:20px 0;text-align:center','처리할 것이 없습니다.'); e.className='tk-empty'; list.appendChild(e); }
+    };
+    _ticketCards(list, d.cards||[], {onChange:upd}); upd(); tog.textContent='보관함 보기';
+  }
+  async function showArchive(){
+    mode='archive'; search.style.display='block'; list.innerHTML='';
+    const d=await (await fetch('/api/tickets/archive?q='+encodeURIComponent(search.value||''))).json();
+    ttl.textContent='보관함 (티켓 '+d.total+'개)'; tog.textContent='처리할 것 보기';
+    _ticketCards(list, d.items||[], {archived:true});
+    if(!(d.items||[]).length) list.appendChild(_tkEl('div','color:#7a808a;padding:20px 0;text-align:center','보관된 것이 없습니다.'));
+  }
+  tog.onclick=()=>{ if(mode==='pending') showArchive(); else showPending(); };
+  let tmr=null; search.oninput=()=>{ clearTimeout(tmr); tmr=setTimeout(showArchive,300); };
+  o.appendChild(box); document.body.appendChild(o);
+  showPending().catch(err=>toast('불러오기 실패: '+err.message));
+}
+async function showTicketReport(){
+  try{
+    const st=await (await fetch('/api/tickets/status')).json();
+    _openTicketReport(st.finished);
+    if(false) toast('아직 보여줄 티켓 확인 결과가 없습니다 ('+(st.state||'idle')+')');
+  }catch(err){ toast('결과를 불러오지 못했습니다: '+err.message); }
+}
+async function _pollTicketCheck(){
+  try{
+    const st=await (await fetch('/api/tickets/status')).json();
+    if(st.state==='waiting'){ _ticketBtn('티켓 확인 (SAP 사이클 대기중…)', true); return; }
+    if(st.state==='running'){ _ticketBtn('티켓 확인 중… (PC 만지지 마세요)', true); return; }
+    clearInterval(_ticketPoll); _ticketPoll=null; _ticketBtn('티켓 확인', false);
+    if(st.state==='done'){ toast('티켓 확인 완료 - 결과를 엽니다'); _openTicketReport(st.finished); }
+    else if(st.state==='error'){ toast('티켓 확인 실패: '+(st.message||'')); }
+  }catch(err){ /* 서버 재시작 중 등 - 다음 폴링에서 재시도 */ }
+}
+async function runTicketCheck(){
+  if(!window.confirm('블룸버그 터미널에서 새 티켓을 읽습니다 (보통 2~5분).\n\n- 읽는 동안 마우스·키보드를 건드리지 마세요.\n- SAP 자동루프는 이 동안 잠깐 대기합니다.\n- 보드는 바뀌지 않고, 반영 제안만 만들어집니다.\n\n시작할까요?')) return;
+  try{
+    const res=await fetch('/api/tickets/check', {method:'POST'});
+    const data=await res.json();
+    if(!res.ok || data.error) throw new Error(data.error||'시작 실패');
+    if(!data.started){ toast(data.message); return; }
+    _ticketBtn('티켓 확인 (시작 중…)', true);
+    if(_ticketPoll) clearInterval(_ticketPoll);
+    _ticketPoll=setInterval(_pollTicketCheck, 3000);
+  }catch(err){ toast('티켓 확인 시작 실패: '+err.message); }
+}
 async function runSap(kind){
   try{
     if(kind==='start'){

@@ -28,16 +28,9 @@
            짧았던 라벨은 그대로 두고 긴 라벨만 축약했다 - 잘려나간 상세 설명은
            전부 title 툴팁에 그대로 남아있음 (호버로 확인 가능). -->
       <div class="btn-grid cols4">
-        <button class="btn block" onclick="runMorningRoutine()" title="0. 아침 루틴 강제 실행 - 매일 08:30 작업 스케줄러가 자동 실행하는 것과 동일 - 그게 혹시 안 돌았을 때 수동으로 대신 실행. 이미 켜져 있는 건 건너뜀">0.아침루틴</button>
         <button class="btn block" onclick="runSap('start')" title="1. SAP Start & Loop">1.Start&amp;Loop</button>
         <button class="btn block warn" onclick="runSap('stop')" title="SAP 자동루프 중지 - 콘솔 창이 없어서(2026-08-25) 더 이상 창을 닫아서 멈출 수 없음 - 대신 이 버튼으로 중지. 워치독이 되살리지 않도록 표시해두고, 다시 켜려면 왼쪽 Start&Loop를 누르면 됨">루프중지</button>
         <button class="btn block" onclick="runSap('all')" title="2. SAP 전체 조회">2.전체조회</button>
-      </div>
-      <div class="btn-grid cols4" title="자동루프가 이미 돌고 있어야 동작 (최대 5초 내 시작). ZRMA RLKR/Q2는 2026-08-26부터 20분 자동루프에서 빠져있어 확인하려면 여기를 눌러야 함">
-        <button class="btn" onclick="runSapSession(0)">VL06O</button>
-        <button class="btn" onclick="runSapSession(1)">VL10G</button>
-        <button class="btn" onclick="runSapSession(2)">ZRMA&nbsp;RLKR</button>
-        <button class="btn" onclick="runSapSession(3)">ZRMA Q2</button>
       </div>
       <div class="ctrl-inline">
         <button class="btn" onclick="runOrderNoAction()">3. 오더번호 반영</button>
@@ -58,6 +51,28 @@
       <div class="btn-grid">
         <button class="btn block" onclick="runSnReloBatch()" title="4-2. S/N 오더 반영 시도 (X→실제 S/N, paper relo 판별) - S/N칸에 실제 회수된 S/N을 먼저 입력해두고 체크 - 오더 원본(VA02)에 그 S/N을 입력·저장 시도합니다. 저장되면 firm/cust 일치 → 이어서 5번 ZREC 처리 가능. 저장 안 되면(에러) firm/cust 불일치로 paper relo 필요 - 항목에 ⚠ 표시됩니다.">4-2. S/N 오더 반영 시도</button>
         <button class="btn block" onclick="runZrecPrepare()" title="5. ZREC 처리 (ZIH08 조회 → 표로 확인 → 자동 Receive) - 체크된(Ready to process) 회수 항목의 시리얼을 ZIH08에 한 번에 조회 → 오더번호/M-N/S-N/수량/아이템명 표를 확인창 하나로 모아 보여줌 → 확인을 누르면 항목마다 순서대로 자동으로 Receive Equipment 클릭(실제 SAP 접수! 중간 팝업 없음) → 전체 끝나면 ZIH08로 6507/0052 접수 확인까지, 확인된 항목은 파란색(완료)으로 자동 전환">5. ZREC 처리</button>
+      </div>
+      <!-- 2026-10-13 user request: 잘 안 쓰는 기능은 삭제하지 않고 접어서 숨김 (필요할 때 펼쳐 사용) -->
+      <div class="hidden-tools" style="display:none"><!-- 안 쓰는 기능: 코드만 유지, 화면 숨김. 필요하면 display:none 제거 -->
+        <div class="btn-grid">
+        <button class="btn block" onclick="runMorningRoutine()" title="0. 아침 루틴 강제 실행 - 매일 08:30 작업 스케줄러가 자동 실행하는 것과 동일 - 그게 혹시 안 돌았을 때 수동으로 대신 실행. 이미 켜져 있는 건 건너뜀">0.아침루틴</button>
+        </div>
+      <div class="btn-grid cols4" title="자동루프가 이미 돌고 있어야 동작 (최대 5초 내 시작). ZRMA RLKR/Q2는 2026-08-26부터 20분 자동루프에서 빠져있어 확인하려면 여기를 눌러야 함">
+        <button class="btn" onclick="runSapSession(0)">VL06O</button>
+        <button class="btn" onclick="runSapSession(1)">VL10G</button>
+        <button class="btn" onclick="runSapSession(2)">ZRMA&nbsp;RLKR</button>
+        <button class="btn" onclick="runSapSession(3)">ZRMA Q2</button>
+      </div>
+      </div>
+    </div>
+  </div>
+  <div class="ctrl-col" id="col-terminal">
+    <h3 onclick="toggleCtrlCol('col-terminal')">Bloomberg Terminal<span class="ctrl-col-toggle">▾</span></h3>
+    <div class="ctrl-col-body">
+      <!-- 2026-10-15: 티켓 확인 (SDSK 수신함 읽기 -> 보드 반영 제안). 1단계: 제안만 만들고 보드는 건드리지 않음 -->
+      <div class="btn-grid">
+        <button class="btn block" id="ticketCheckBtn" onclick="runTicketCheck()" title="블룸버그 터미널 수신함의 새 SDSK 티켓/업데이트를 Claude가 읽고, 배송장에 무엇을 바꿔야 하는지 제안을 만듭니다(보드는 수정하지 않음). 읽는 동안 SAP 자동루프는 잠깐 대기하고, 마우스·키보드를 건드리면 안 됩니다.">티켓 확인</button>
+        <button class="btn block" id="ticketReportBtn" onclick="showTicketReport()" title="마지막 티켓 확인 결과 보기">티켓 결과</button>
       </div>
     </div>
   </div>
@@ -92,12 +107,14 @@
       <button class="btn block finish" onclick="finalizeChecked()" title="날짜 줄의 체크박스를 누르면 그 날짜의 행이 전부 기본 체크됨 - 아직 해결 안 된 행은 체크만 해제하면 이번 마감에서 빠지고 보드에 그대로 남음(며칠 뒤 그 행만 체크해서 마감하면 원래 날짜의 시트 맨 아래에 이어붙음). 엑셀 저장이 성공해야만 workbench.db에서도 삭제됨">마감 (내보내기 + 삭제)</button>
       <button class="btn block" onclick="printChecked()" title="날짜 줄의 체크박스(날짜 전체) 또는 행 체크박스(오더 단위, 한쪽 leg만 체크해도 같은 오더 전체가 인쇄됨)로 선택 - A4 가로, 흑백">배송장 인쇄</button>
       <div class="ctrl-divider"></div>
+      <div class="hidden-tools" style="display:none"><!-- 안 쓰는 기능: 코드만 유지, 화면 숨김. 필요하면 display:none 제거 -->
       <div class="ctrl-inline" title="평상시엔 필요 없음 - SAP 수집이 workbench.db에 직접 반영되므로 자동 동기화는 더 이상 엑셀을 다시 읽지 않음. 엑셀에 직접 입력/수정한 내용을 워크벤치로 가져와야 할 때만 시트명과 행 범위를 지정해 1회성으로 사용">
         <input type="text" id="excelRangeSheet" placeholder="시트명 (예: 8-6)" size="10">
         <input type="number" id="excelRangeStart" placeholder="시작행" min="1" style="width:5em">
         <input type="number" id="excelRangeEnd" placeholder="종료행" min="1" style="width:5em">
       </div>
       <button class="btn block" onclick="importExcelRange()" title="위 시트의 지정한 행 범위만 1회성으로 workbench.db에 불러옵니다 - 비상시에만 사용">3. 엑셀에서 범위 불러오기 (비상용)</button>
+      </div>
       <div class="ctrl-divider"></div>
       <button class="btn block" onclick="runQuickSettlement()" title="월초 작업 1) 퀵 금액 정리 - 퀵회사 월 내역서 + 배송장 마감 파일의 퀵/Taxi/우체국 memo를 대조해 '2026-퀵 快递明细表.xlsx'에 월별 시트를 만듭니다. 먼저 사본에 미리보기를 만들어 결과를 보여주고, 확인하면 원본에 반영(원본은 자동 백업). 정리 코드: quick_settlement 저장소">월초: 퀵 금액 정리</button>
     </div>

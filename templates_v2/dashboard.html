@@ -127,6 +127,10 @@
       </details>
     </div>
     <div class="side-sec tools">
+      <h4>Bloomberg Terminal</h4>
+      <div class="srow"><button class="btn block" id="ticketCheckBtn" onclick="runTicketCheck()" title="블룸버그 터미널 수신함의 새 SDSK 티켓/업데이트를 Claude가 읽고, 배송장에 무엇을 바꿔야 하는지 제안을 만듭니다(보드는 수정하지 않음). 읽는 동안 SAP 자동루프는 잠깐 대기하고, 마우스·키보드를 건드리면 안 됩니다.">티켓 확인</button><button class="btn block" id="ticketReportBtn" onclick="showTicketReport()" title="마지막 티켓 확인 결과 보기">티켓 결과</button></div>
+    </div>
+    <div class="side-sec tools">
       <h4>Bloomberg Portal</h4>
       <div class="srow"><button class="btn block" onclick="openPortalLoginManual()" title="Chrome만 열림 - 자동입력/자동클릭 없음, 직접 로그인+B-Unit 인증. 켜둔 채로 재사용됨">Portal 로그인 (수동)</button><button class="btn block" onclick="runLatestZpl()" title="Downloads 폴더에서 가장 최근 .ZPL/.zpl(또는 PDF 라벨)을 찾아 Zebra 프린터로 바로 전송">최근 ZPL 수동 인쇄</button></div>
       <div class="srow"><button class="btn block primary" onclick="runPortalBatch()" title="체크된 행의 오더별로 확인창 후 하나씩 순서대로 실행 (동시 실행 안 함)">Serial 등록 &amp; QR 인쇄</button><button class="btn block" onclick="runPodBatch()" title="체크된 행 기준으로 Portal POD(배송완료) 처리 - 배송만 체크하면 배송만, 배송+회수 둘 다 체크하면 둘 다 완료로 저장. 오더별 미리보기 확인 후 저장">POD (배송완료) 처리</button><button class="btn block" onclick="runSpareOneshot()" title="누르면 POD 내용 확인창이 먼저 뜨고, 확인하면 Serial 등록부터 POD(배송완료) 저장까지 중간 팝업 없이 한 번에 진행 (QR 인쇄는 생략)">스페어 배송처리 (serial+POD처리)</button></div>

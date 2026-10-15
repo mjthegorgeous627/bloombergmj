@@ -457,3 +457,13 @@ SDSK 1334533923 | Add-On Non-Billable SID(s) | Rep Him-Chan Park
 - 시험 중 수신함의 `Daily Listing Of Appointments`(10/8 8:07) 1건을 실수로 읽음 처리함(무해).
 - 알림창 조사용 백그라운드 감시(`probe_notify_windows.py`)는 종료함. 알림창 감지는 `BLPMsgWClass` 창 클래스로 새로 구현해야 한다(wintrv.exe 프로세스, topmost, 제목 없음, 우상단).
 
+
+### 12-5. workbench "티켓 확인" 버튼 (2026-10-15, 1단계 완료)
+사용자가 VS Code에서 말하지 않고 workbench 버튼으로 티켓을 확인하게 하는 기능. **1단계 = 읽기 + 제안만, 보드는 수정하지 않는다.**
+- **흐름**: 버튼(`dashboard.html` SAP 열, `01_core_status.js`의 `runTicketCheck`) → `POST /api/tickets/check` → `ticket_ops.py`가 숨김 프로세스로 `tickets/ticket_check_run.py` 실행 → 터미널 잠금 획득 → 백그라운드 Claude(`claude -p`, 허용 도구는 `Read`와 `python -X utf8 tickets/ticket_tools.py:*` 뿐, `--permission-mode dontAsk`)가 `tickets/CHECK_PROMPT.md` 절차대로 수신함을 읽고 보고서 작성 → `tickets/runs/latest_report.md` + `status.json` → 화면에 결과 창(제안만 표시). 15분 제한.
+- **도구**: `tickets/ticket_tools.py` — `inbox`(수신함 캡처), `open <행y> <이름>`(줄 클릭→링크 클릭, 읽음 처리), `read <SDSK>`(본문 전체), `board <검색어>`(보드 읽기 전용 검색). 캡처 저장 `C:\1\티켓관리\inbox\run\`.
+- **SAP 루프와의 충돌 방지**: `sap_automation/terminal_gate.py`. 티켓 확인은 시작 전 SAP 사이클이 끝나길 기다린 뒤 `terminal_busy.json` 잠금을 건다(20초마다 heartbeat). `main.py`의 `run_once()`/`_run_session()`은 시작 전 `wait_until_free()`로 잠금이 풀릴 때까지 대기(최대 20분). heartbeat가 120초 끊기면 죽은 잠금으로 무시. 사이클이 30분 넘게 running이면 멈춘 것으로 보고 기다리지 않음. **main.py 변경은 SAP 루프를 재시작해야 적용**(2026-10-15 11:00 재시작 완료).
+- **첫 실행(2026-10-15)**: 약 3분, 티켓 4건 읽음. 자동 배정 알림(1339516950)은 본문 위쪽을 안 읽어 "조치 없음"으로 잘못 봄 → CHECK_PROMPT에 "자동 배정/신규 배정 티켓은 `read`로 본문 전체" 규칙 추가.
+- **다음 단계**: 2) 제안 카드 + 승인 버튼, 3) 승인한 Memo 추가/새 행/날짜 변경 반영(`/api/tickets/apply` 신설, Memo는 덮어쓰기 금지·덧붙이기만), 4) 알림 감지 시 자동 실행(보류했던 "티켓 자동 루프"). 읽는 동안 사용자가 PC를 쓰면 안전장치가 중단시킨다(결과에 오류로 표시).
+- **OCR 전환 (2026-10-15)**: 터미널은 복사(Ctrl+C)·UI Automation(Chromium 렌더링, 글자 정보 없음, 낭독기 모드도 무효) 모두 막혀 글자를 직접 못 가져온다 → 캡처 영역만 잘라 **윈도우 내장 OCR**(`tickets/ocr.ps1`, `ocr.py`; en-US/ko 엔진 둘 다 실행, 추가 설치 없음)로 글자화해 Claude에게 글로 전달. 영어 엔진은 영어 정확·한글 불가, 한국어 엔진은 한글 가능·영어 오타(A닙B, tO). `ticket_tools.py open`은 메일 머리/본문, 티켓 머리/속성/Details 글 목록을 OCR 글로 출력, `read`는 스크롤 프레임을 OCR 후 겹친 줄을 제거해 1번 글~최신 글을 한 번에 출력. 이미지 원본은 OCR이 이상할 때만 본다. 시험 결과: OCR 정확도 높음(영어), 전체 실행 약 2분(티켓 4건). 시간은 대부분 Claude의 단계 수·터미널 대기라 속도 이득은 작고 **사용량(토큰) 절감이 주 효과**.
+- **알려진 문제**: 같은 티켓에 수신함 줄이 여러 개일 때 클릭한 줄만 읽음 처리되고 아래 줄은 노랑으로 남아, 다음 실행에서 같은 티켓을 또 열 수 있다 → 다음 개선: 티켓별 "마지막으로 본 글 시각"을 저장해 같으면 건너뜀(seen 기록).

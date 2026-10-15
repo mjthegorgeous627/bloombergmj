@@ -48,6 +48,7 @@ from excel_handler import write_kakao_sent, get_existing_order_numbers
 from kakao_handler import send_kakao_order, format_kakao_message
 from win_notify import send_windows_notification
 from focus_guard import ForegroundLock
+import terminal_gate
 
 # 2026-08-26 사용자 요청으로 ZRMA RLKR/Q2(세션2/3)를 자동 20분 루프에서 뺐었으나,
 # 2026-09-02 재검토 후 다시 켬: delivery block이 걸린 교환(ZRX) 오더는 VL06O/VL10G가
@@ -161,6 +162,7 @@ def run_once(excel_only=False):
     감싸서 자동화가 프로그램적으로 창을 앞으로 가져오는 것만 막는다. 사용자가
     SAP 창을 직접 클릭하는 건 이 락과 무관하게 항상 그대로 작동한다(focus_guard.py
     설명 참고). 실제 작업은 그대로 _run_once_impl()가 한다."""
+    terminal_gate.wait_until_free(log=logger.info)   # 2026-10-15: 티켓 확인(터미널 조작) 중이면 끝날 때까지 대기
     _mark_cycle_state("running")
     try:
         with ForegroundLock():
@@ -524,6 +526,7 @@ def _mark_cycle_state(status):
 def _run_session(sess_idx):
     """개별 세션 단독 실행. run_once()와 같은 이유로 ForegroundLock 적용 -
     실제 작업은 _run_session_impl()가 한다."""
+    terminal_gate.wait_until_free(log=logger.info)   # 2026-10-15: 티켓 확인 중이면 대기
     _mark_cycle_state("running")
     try:
         with ForegroundLock():

@@ -28,6 +28,7 @@ from sap_ops import _sap_loop_watchdog_thread
 from portal_ops import *
 from monthly_tasks import run_quick_settlement
 import history_search
+import ticket_ops
 import v2_ops
 def render_notes_page():
     """2026-08-31 사용자 요청: 오더/날짜와 무관한 잡메모(링크, 전화번호, 계정정보
@@ -223,6 +224,16 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/sap/status":
                 self.send_json(sap_status())
                 return
+            if parsed.path == "/api/tickets/pending":
+                self.send_json(ticket_ops.ticket_pending())
+                return
+            if parsed.path == "/api/tickets/archive":
+                qs = parse_qs(parsed.query)
+                self.send_json(ticket_ops.ticket_archive_list((qs.get("q") or [""])[0]))
+                return
+            if parsed.path == "/api/tickets/status":
+                self.send_json(ticket_ops.ticket_check_status())
+                return
             if parsed.path == "/api/items/deleted":
                 self.send_json({"items": list_deleted_items()})
                 return
@@ -348,6 +359,28 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/undo":
                 self.send_json(undo_last_action())
+                return
+            if parsed.path == "/api/tickets/handle":
+                try:
+                    b = self.read_json()
+                    self.send_json(ticket_ops.ticket_handle(b.get("key"), b.get("result") or ""))
+                except Exception as e:
+                    self.send_json({"error": str(e)}, 400)
+                return
+            if parsed.path == "/api/tickets/open":
+                try:
+                    self.send_json(ticket_ops.ticket_open(self.read_json().get("number")))
+                except Exception as e:
+                    self.send_json({"error": str(e)}, 400)
+                return
+            if parsed.path == "/api/tickets/apply":
+                try:
+                    self.send_json(ticket_ops.ticket_apply(self.read_json().get("proposal") or {}))
+                except Exception as e:
+                    self.send_json({"error": str(e)}, 400)
+                return
+            if parsed.path == "/api/tickets/check":
+                self.send_json(ticket_ops.ticket_check_start())
                 return
             if parsed.path == "/api/sap/start_loop":
                 self.send_json(sap_start_loop())

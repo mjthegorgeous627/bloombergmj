@@ -167,6 +167,12 @@ def open_ticket_from_inbox(row_y, wait=8):
     ensure_terminal(); click(*MAIL_SDSK_LINK); time.sleep(wait)
     return mail, grab_box((0, 0, 1920, 1080))
 
+def open_mail_from_inbox(row_y):
+    """일반 메일(SDSK 아님): 수신함 줄 클릭 -> 메일 화면만 캡처. 링크는 누르지 않는다. 먼저 goto('MSG') 상태여야 한다."""
+    ensure_english_ime(ensure_terminal())
+    click(INBOX_ROW_X, row_y); time.sleep(4)
+    return grab_box((0, 0, 1920, 1080))
+
 def grab_box(box):
     return ImageGrab.grab(all_screens=True).crop(box).convert("RGB")
 
