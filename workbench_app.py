@@ -185,7 +185,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(history_search.search(qs.get("q", [""])[0]))
                 return
             if parsed.path == "/api/history/day":
-                self.send_json(history_search.day_detail(parse_qs(parsed.query).get("date", [""])[0]))
+                qs = parse_qs(parsed.query)
+                self.send_json(history_search.day_detail(qs.get("date", [""])[0], qs.get("sheet_id", [""])[0] or None))
+                return
+            if parsed.path == "/api/history/misc":
+                self.send_json(history_search.misc_sheets())
                 return
             if parsed.path == "/api/history/group":
                 qs = parse_qs(parsed.query)

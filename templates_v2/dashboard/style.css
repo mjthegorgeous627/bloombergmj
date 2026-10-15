@@ -484,6 +484,13 @@ body.side-closed .pin-panel{right:56px}
 .dayh-c:focus{outline:2px solid #2563eb;background:#eff6ff}
 .dayh-c.dayh-saving{background:#fef9c3}.dayh-c.dayh-ok{background:#dcfce7}.dayh-c.dayh-err{background:#fecaca}
 
+.dayh-wrap{overflow-x:auto}
+.dayh-tbl td.dayh-k{font-weight:700;white-space:nowrap;width:1%}
+.dayh-c:focus{background:#eff6ff !important}
+.dayh-misc{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px}
+.dayh-misc button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 9px;cursor:pointer;font-size:12px}
+.dayh-misc button span{color:#94a3b8;font-size:10.5px}.dayh-misc button:hover{background:#f1f5f9}
+
 /* 퀵 기사님 안내문 */
 .quick-modal{background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,.3);width:min(1000px,94vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
 .quick-head{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);background:#f8fafc}

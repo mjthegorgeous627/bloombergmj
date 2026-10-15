@@ -214,3 +214,10 @@ body.side-closed .pin-panel{right:56px}
 .dayh-tbl tr.dayh-brk td{border-top:2px solid #cbd5e1}
 .dayh-c:focus{outline:2px solid #2563eb;background:#eff6ff}
 .dayh-c.dayh-saving{background:#fef9c3}.dayh-c.dayh-ok{background:#dcfce7}.dayh-c.dayh-err{background:#fecaca}
+
+.dayh-wrap{overflow-x:auto}
+.dayh-tbl td.dayh-k{font-weight:700;white-space:nowrap;width:1%}
+.dayh-c:focus{background:#eff6ff !important}
+.dayh-misc{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px}
+.dayh-misc button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 9px;cursor:pointer;font-size:12px}
+.dayh-misc button span{color:#94a3b8;font-size:10.5px}.dayh-misc button:hover{background:#f1f5f9}

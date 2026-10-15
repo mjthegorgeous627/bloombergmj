@@ -75,7 +75,65 @@ def _connect():
     conn = sqlite3.connect(HISTORY_DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    # 2026-10-15: 색/병합/헤더없는 시트 표시용 컬럼 (기존 DB에는 ALTER로 추가)
+    for table, col, ddl in (("rows", "fills_json", "TEXT"), ("sheets", "merges_json", "TEXT"), ("sheets", "no_header", "INTEGER DEFAULT 0")):
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if col not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+    conn.commit()
     return conn
+
+
+def _json_dumps(o):
+    import json
+    return json.dumps(o)
+
+
+def _fill_hex(cell):
+    """칸 배경색(단색 RGB)만 'RRGGBB'로. 흰색/없음/테마색은 None."""
+    f = getattr(cell, "fill", None)
+    if not f or f.fill_type != "solid":
+        return None
+    col = f.fgColor
+    if col is None or col.type != "rgb" or not isinstance(col.rgb, str):
+        return None
+    rgb = col.rgb[-6:].upper()
+    return None if rgb in ("FFFFFF", "000000") else rgb
+
+
+def _sheet_merges(xlsx_path):
+    """시트 XML의 <mergeCells>를 직접 읽는다(openpyxl read_only는 병합 정보를 안 줌).
+    반환: {시트명: [[r1,c1,r2,c2], ...]} (열 _MAX_COLS 이내)."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+    from openpyxl.utils.cell import range_boundaries
+
+    out = {}
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+          "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
+    with zipfile.ZipFile(xlsx_path) as z:
+        wbx = ET.fromstring(z.read("xl/workbook.xml"))
+        rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+        target = {r.get("Id"): r.get("Target") for r in rels}
+        for s in wbx.find("m:sheets", ns):
+            rid = s.get("{%s}id" % ns["r"])
+            t = (target.get(rid) or "").lstrip("/")
+            path = t if t.startswith("xl/") else "xl/" + t
+            try:
+                with z.open(path) as fh:
+                    merges = []
+                    for _, el in ET.iterparse(fh, events=("end",)):
+                        tag = el.tag.rsplit("}", 1)[-1]
+                        if tag == "mergeCell":
+                            c1, r1, c2, r2 = range_boundaries(el.get("ref"))
+                            if c1 <= _MAX_COLS and (r2 > r1 or c2 > c1):
+                                merges.append([r1, c1, r2, min(c2, _MAX_COLS)])
+                        elif tag == "row":
+                            el.clear()
+                    out[s.get("name")] = merges
+            except KeyError:
+                out[s.get("name")] = []
+    return out
 
 
 def _cell_text(v):
@@ -151,6 +209,11 @@ def _index_workbook(conn, path: Path):
     key = str(path)
     conn.execute("DELETE FROM rows WHERE sheet_id IN (SELECT id FROM sheets WHERE source_file=?)", (key,))
     conn.execute("DELETE FROM sheets WHERE source_file=?", (key,))
+    try:
+        merges_by_sheet = _sheet_merges(tmp)
+    except Exception:
+        logger.warning("merge scan failed: %s", path, exc_info=True)
+        merges_by_sheet = {}
     wb = openpyxl.load_workbook(tmp, read_only=True, data_only=True)
     stats = {"sheets": 0, "rows": 0, "skipped_no_header": 0, "skipped_dup": 0}
     try:
@@ -158,20 +221,28 @@ def _index_workbook(conn, path: Path):
             ws = wb[name]
             first = [list(r[:_MAX_COLS]) for r in ws.iter_rows(min_row=1, max_row=4, values_only=True)]
             hi = _header_row_index(first)
+            no_header = 0
             if hi is None:
-                stats["skipped_no_header"] += 1
-                continue
+                # 2026-10-15: 헤더(M/N,S/N) 없는 시트도 메모/이벤트/주소록 등으로 쓰였으므로 전부 색인한다.
+                no_header = 1
+                hi = -1
+                stats["skipped_no_header"] += 1   # (이름은 그대로 두되 이제는 '헤더 없는 시트 수'로 집계)
             title = _cell_text(first[0][0]) if first and first[0] else ""
             sheet_date = _parse_sheet_date(title, name, file_year, idx)
             data = []
+            fills = {}
             for excel_row, r in enumerate(
-                ws.iter_rows(min_row=hi + 2, max_row=hi + 2 + 600, values_only=True), start=hi + 2
+                ws.iter_rows(min_row=hi + 2, max_row=hi + 2 + 600, max_col=_MAX_COLS), start=hi + 2
             ):
-                cells = [_cell_text(c) for c in list(r[:_MAX_COLS])]
+                cells = [_cell_text(c.value) for c in r]
                 while cells and not cells[-1]:
                     cells.pop()
                 if any(cells):
                     data.append((excel_row, cells))
+                    fm = {i: _fill_hex(c) for i, c in enumerate(r)}
+                    fm = {i: v for i, v in fm.items() if v}
+                    if fm:
+                        fills[excel_row] = fm
             if not data:
                 continue
             digest = hashlib.md5(repr([c for _, c in data]).encode("utf-8")).hexdigest()
@@ -183,8 +254,8 @@ def _index_workbook(conn, path: Path):
                 stats["skipped_dup"] += 1
                 continue
             cur = conn.execute(
-                "INSERT INTO sheets(source_file, sheet_name, sheet_date, content_hash, row_count) VALUES (?,?,?,?,?)",
-                (key, name, sheet_date, digest, len(data)),
+                "INSERT INTO sheets(source_file, sheet_name, sheet_date, content_hash, row_count, merges_json, no_header) VALUES (?,?,?,?,?,?,?)",
+                (key, name, sheet_date, digest, len(data), _json_dumps(merges_by_sheet.get(name) or []), no_header),
             )
             sheet_id = cur.lastrowid
             group_no, cur_order = 0, None
@@ -200,8 +271,8 @@ def _index_workbook(conn, path: Path):
                 elif group_no == 0:
                     group_no = 1
                 conn.execute(
-                    "INSERT INTO rows(sheet_id, group_no, excel_row, kind, order_no, cells_json, search_text) "
-                    "VALUES (?,?,?,?,?,?,?)",
+                    "INSERT INTO rows(sheet_id, group_no, excel_row, kind, order_no, cells_json, search_text, fills_json) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
                     (
                         sheet_id,
                         group_no,
@@ -210,6 +281,7 @@ def _index_workbook(conn, path: Path):
                         order_no,
                         _json.dumps(cells, ensure_ascii=False),
                         " | ".join(c for c in cells if c).lower(),
+                        _json.dumps(fills[excel_row]) if excel_row in fills else None,
                     ),
                 )
             stats["sheets"] += 1
@@ -288,6 +360,7 @@ def _row_dict(r):
         "kind": r["kind"] or "",
         "orderNo": r["order_no"] or "",
         "cells": cells,
+        "fills": (_json.loads(r["fills_json"]) if r["fills_json"] else {}),
     }
 
 
@@ -381,22 +454,40 @@ def restore_to_workbench(row_ids, target_date=None):
     return {"restored": len(created), "orderIds": created}
 
 
-def day_detail(date_iso):
-    """달력에서 마감된 과거 날짜를 눌렀을 때: 그 날짜의 시트(들)와 행 전체."""
+def day_detail(date_iso=None, sheet_id=None):
+    """달력에서 마감된 과거 날짜(또는 날짜 없는 시트 하나)의 시트와 행 전체(+색/병합 정보)."""
+    import json as _json
+
     conn = _connect()
     try:
+        if sheet_id:
+            shs = conn.execute("SELECT * FROM sheets WHERE id=?", (int(sheet_id),)).fetchall()
+        else:
+            shs = conn.execute("SELECT * FROM sheets WHERE sheet_date=? ORDER BY no_header, id", (date_iso,)).fetchall()
         out = []
-        for sh in conn.execute("SELECT * FROM sheets WHERE sheet_date=? ORDER BY id", (date_iso,)).fetchall():
-            rows = conn.execute(
-                "SELECT * FROM rows WHERE sheet_id=? ORDER BY excel_row", (sh["id"],)
-            ).fetchall()
+        for sh in shs:
+            rows = conn.execute("SELECT * FROM rows WHERE sheet_id=? ORDER BY excel_row", (sh["id"],)).fetchall()
             out.append({
                 "sheetId": sh["id"],
                 "sheetName": sh["sheet_name"],
                 "sourceFile": Path(sh["source_file"]).name,
+                "noHeader": bool(sh["no_header"]),
+                "merges": _json.loads(sh["merges_json"]) if sh["merges_json"] else [],
                 "rows": [_row_dict(r) for r in rows],
             })
-        return {"date": date_iso, "sheets": out}
+        return {"date": date_iso or "", "sheets": out}
+    finally:
+        conn.close()
+
+
+def misc_sheets():
+    """날짜를 못 읽은 시트(메모/이벤트/주소록 등) 목록."""
+    conn = _connect()
+    try:
+        return {"sheets": [
+            {"sheetId": r["id"], "sheetName": r["sheet_name"], "sourceFile": Path(r["source_file"]).name, "rows": r["row_count"]}
+            for r in conn.execute("SELECT * FROM sheets WHERE sheet_date IS NULL ORDER BY source_file DESC, id").fetchall()
+        ]}
     finally:
         conn.close()
 

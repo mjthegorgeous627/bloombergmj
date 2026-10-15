@@ -90,7 +90,7 @@ function renderSideCalendar(){
     h += '<button type="button" class="' + cls + '" title="' + tip + '" onclick="sideCalClick(\'' + iso + '\',event)" oncontextmenu="sideCalHoliday(\'' + iso + '\',event)"><span class="n">' + d + '</span>' + (s.tot ? '<span class="c">' + s.tot + '</span>' : '') + '</button>';
   }
   h += '</div>';
-  h += '<div class="sc-leg">우클릭 = 휴무일 지정/해제</div>';
+  h += '<div class="sc-leg">우클릭 = 휴무일 지정/해제 · <a href="#" onclick="openMiscSheets();return false" style="color:inherit">메모 시트</a></div>';
   host.innerHTML = h;
 }
 function sideCalNav(delta){
