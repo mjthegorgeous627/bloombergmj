@@ -69,13 +69,15 @@ def wheel(x, y, notches):
 def enter():
     win32api.keybd_event(0x0D, 0x1c, 0, 0); time.sleep(0.05); win32api.keybd_event(0x0D, 0x1c, 2, 0)
 
-def vk_type(s):
+def vk_type(s, delay=0.003):
+    """가상키 타이핑. 붙여넣기(Ctrl+V/Shift+Insert)는 터미널 명령창에서 안 되므로 지연을 최소화해 사실상 한 번에 입력
+    (2026-10-15 실측: 지연 3ms로 'SDSK 1339513698' 15글자 누락 없이 입력, 약 1초)."""
     for c in s:
         v = win32api.VkKeyScan(c); vk = v & 0xff; sc = U.MapVirtualKeyW(vk, 0); sh = (v >> 8) & 1
         if sh: win32api.keybd_event(0x10, 0, 0, 0)
-        win32api.keybd_event(vk, sc, 0, 0); time.sleep(0.02); win32api.keybd_event(vk, sc, 2, 0)
+        win32api.keybd_event(vk, sc, 0, 0); win32api.keybd_event(vk, sc, 2, 0)
         if sh: win32api.keybd_event(0x10, 0, 2, 0)
-        time.sleep(0.04)
+        time.sleep(delay)
 
 def _exe_name(hwnd):
     import os, win32process, win32api
@@ -152,10 +154,24 @@ def ensure_english_ime(hwnd):
     except Exception:
         pass
 
+INBOX_ROW_X = 700          # 수신함 줄 클릭 x (제목 글자 위)
+MAIL_SDSK_LINK = (278, 275)  # 메일 상단 '블룸버그 기능 (SDSK)' 파란 링크 (2026-10-15 3건 실측, 위치 동일)
+
+def open_ticket_from_inbox(row_y, wait=8):
+    """수신함의 한 줄(y 좌표)을 클릭해 메일을 열고(읽음 처리됨) 상단 SDSK 링크를 클릭해 티켓으로 들어간다.
+    사용자가 읽음 표시로 처리 여부를 눈으로 확인할 수 있게 하기 위한 방식(2026-10-15 사용자 요청). 먼저 goto('MSG') 상태여야 한다.
+    반환: (메일 화면 캡처, 티켓 화면 캡처) PIL 이미지. 메일 본문에 최신 글이 그대로 들어 있어 메일 캡처만으로도 최신 내용을 읽을 수 있다."""
+    ensure_english_ime(ensure_terminal())
+    click(INBOX_ROW_X, row_y); time.sleep(4)
+    mail = grab_box((0, 0, 1920, 1080))
+    ensure_terminal(); click(*MAIL_SDSK_LINK); time.sleep(wait)
+    return mail, grab_box((0, 0, 1920, 1080))
+
 def grab_box(box):
     return ImageGrab.grab(all_screens=True).crop(box).convert("RGB")
 
 def goto(cmd, wait=5):
     ensure_english_ime(ensure_terminal())
     click(360, 85); time.sleep(0.3)
+    ctrl(0x41); time.sleep(0.2)          # 명령창에 남은 글자와 섞이지 않게 전체 선택 후 덮어쓰기 (2026-10-13 메뉴 화면으로 빠진 사례)
     vk_type(cmd); time.sleep(0.6); enter(); time.sleep(wait)
