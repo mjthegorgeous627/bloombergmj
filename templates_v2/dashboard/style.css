@@ -469,6 +469,21 @@ body.side-closed .pin-panel{right:56px}
 /* 마감 완료된 날짜(보드엔 남은 행 없음): 숫자만 연한 회색 알약 */
 .sc-day.fin .c{background:#e2e8f0;color:#475569}
 
+/* 마감된 과거 날짜 이력 팝업 (2026-10-15) */
+.dayh-back{position:fixed;inset:0;z-index:130;background:rgba(15,23,42,.35);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px}
+.dayh-box{background:#fff;border-radius:10px;box-shadow:0 14px 40px rgba(15,23,42,.3);width:min(1100px,100%);max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
+.dayh-head{display:flex;align-items:center;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:13px}
+.dayh-head span{color:#94a3b8;font-size:11.5px}.dayh-head i{font-style:normal;font-size:11.5px;color:#475569;margin-left:auto}
+.dayh-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:#64748b}
+.dayh-scroll{overflow:auto;padding:8px 14px 14px}
+.dayh-src{font-size:10.5px;color:#94a3b8;margin:8px 0 4px}
+.dayh-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.dayh-tbl th{position:sticky;top:0;background:#e2e8f0;text-align:left;padding:4px 7px;color:#475569}
+.dayh-tbl td{border-top:1px solid var(--line);padding:4px 7px;vertical-align:top;white-space:pre-line;min-width:48px}
+.dayh-tbl tr.dayh-brk td{border-top:2px solid #cbd5e1}
+.dayh-c:focus{outline:2px solid #2563eb;background:#eff6ff}
+.dayh-c.dayh-saving{background:#fef9c3}.dayh-c.dayh-ok{background:#dcfce7}.dayh-c.dayh-err{background:#fecaca}
+
 /* 퀵 기사님 안내문 */
 .quick-modal{background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,.3);width:min(1000px,94vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
 .quick-head{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);background:#f8fafc}

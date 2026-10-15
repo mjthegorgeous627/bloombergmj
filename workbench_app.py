@@ -184,6 +184,9 @@ class Handler(BaseHTTPRequestHandler):
                 qs = parse_qs(parsed.query)
                 self.send_json(history_search.search(qs.get("q", [""])[0]))
                 return
+            if parsed.path == "/api/history/day":
+                self.send_json(history_search.day_detail(parse_qs(parsed.query).get("date", [""])[0]))
+                return
             if parsed.path == "/api/history/group":
                 qs = parse_qs(parsed.query)
                 detail = history_search.group_detail(int(qs.get("sheet_id", ["0"])[0]), int(qs.get("group_no", ["0"])[0]))
@@ -244,6 +247,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/history/reindex":
                 history_search.reindex_async()
                 self.send_json({"started": True})
+                return
+            if parsed.path == "/api/history/edit":
+                self.send_json(history_search.update_cells(self.read_json().get("edits") or []))
                 return
             if parsed.path == "/api/history/restore":
                 body = self.read_json()

@@ -102,7 +102,7 @@ wr('dashboard/08_finalize_init.js', j8)
 s = rd('dashboard/style.css')
 s += open(os.path.join(HERE, 'A_extra.css'), encoding='utf-8').read() + open(os.path.join(HERE, 'quick.css'), encoding='utf-8').read()
 wr('dashboard/style.css', s)
-wr('dashboard/09_side_panel.js', open(os.path.join(HERE, 'A_09_side_panel.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_quick.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_forms.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_redo.js'), encoding='utf-8').read())
+wr('dashboard/09_side_panel.js', open(os.path.join(HERE, 'A_09_side_panel.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_quick.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_forms.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_redo.js'), encoding='utf-8').read() + open(os.path.join(HERE, 'A_dayhist.js'), encoding='utf-8').read())
 # 실제 서버용 사본: sap_automation\templates_v2 (PREVIEW_ONLY 환경에서는 건너뜀)
 V2 = os.environ.get('V2_DIR')
 if V2:

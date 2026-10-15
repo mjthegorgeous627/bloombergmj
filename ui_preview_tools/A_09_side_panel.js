@@ -108,6 +108,8 @@ function sideCalHoliday(iso, ev){
 function sideCalClick(iso, ev){
   if(ev.ctrlKey || ev.metaKey){ sideCalHoliday(iso, ev); return; }
   if(document.querySelectorAll('.row-check:checked').length){ moveCheckedToDate(iso); return; }
+  // 보드에 이미 없는 과거(마감된) 날짜 -> 이력 팝업 (수정하면 원본 배송장 엑셀에 셀 단위로 반영)
+  if(iso <= localTodayIso() && !document.querySelector('tbody.date-group[data-date="' + iso + '"]')){ openDayHistory(iso); return; }
   jumpToDate(iso);
 }
 function jumpToDate(iso){

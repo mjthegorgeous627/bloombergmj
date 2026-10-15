@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bloomberg Dashboard Seoul</title>
+<style>
+/*#include dashboard/style.css*/
+</style>
+</head>
+<body>
+<div class="sticky-top">
+<div class="topbar"><h1>Bloomberg Dashboard Seoul</h1><a href="/" title="원래 화면(v1)으로 돌아갑니다 - 데이터는 같습니다" style="color:#fde68a;text-decoration:none;font-size:11.5px;border:1px solid #b45309;background:#78350f;border-radius:5px;padding:3px 8px;font-weight:700">v2 테스트 · v1로 돌아가기</a><a href="/history" target="_blank" style="color:#cbd5e1;text-decoration:none;font-size:11.5px;border:1px solid #475569;border-radius:5px;padding:3px 8px" title="2017년부터 마감된 배송 이력을 시리얼/오더번호로 검색">🔍 이력</a><a href="/notes" style="color:#cbd5e1;text-decoration:none;font-size:11.5px;border:1px solid #475569;border-radius:5px;padding:3px 8px" title="오더/날짜와 무관한 잡메모(링크, 전화번호 등)">📌 메모</a><div id="calWrap" style="display:none"><div id="calPanel"></div></div><div id="sapLoopWrap"><div id="sapLoopStatus" onclick="toggleSapLoopMenu(event)"><span class="dot"></span><span class="txt">SAP 루프 확인 중...</span></div><div id="sapLoopMenu">
+  <button onclick="runSap('start');closeSapLoopMenu()">SAP 루프 시작</button>
+  <button onclick="runSap('stop');closeSapLoopMenu()">SAP 루프 중지</button>
+  <hr>
+  <button class="danger" onclick="restartWorkbench();closeSapLoopMenu()">Workbench 강제 재시작</button>
+</div></div><div id="clock"></div></div></div>
+
+<div class="controls" id="hiddenCtl" style="display:none">
+  <div id="mergeFieldHome"><div class="merge-field-row">
+    <label><input type="checkbox" class="merge-field-cb" value="order">Order#</label>
+    <label><input type="checkbox" class="merge-field-cb" value="customer" checked>Customer</label>
+    <label><input type="checkbox" class="merge-field-cb" value="phone" checked>Phone</label>
+    <label><input type="checkbox" class="merge-field-cb" value="address" checked>Address</label>
+    <label><input type="checkbox" class="merge-field-cb" value="memo" checked>Memo</label>
+  </div></div>
+  <input type="date" id="moveDateInput" onchange="moveCheckedToDate(this.value); this.value='';">
+  <div class="hidden-tools">
+    <button class="btn block" onclick="runMorningRoutine()" title="0. 아침 루틴 강제 실행 - 매일 08:30 작업 스케줄러가 자동 실행하는 것과 동일 - 그게 혹시 안 돌았을 때 수동으로 대신 실행. 이미 켜져 있는 건 건너뜀">0.아침루틴</button><button class="btn" onclick="runSapSession(0)">VL06O</button><button class="btn" onclick="runSapSession(1)">VL10G</button><button class="btn" onclick="runSapSession(2)">ZRMA&nbsp;RLKR</button><button class="btn" onclick="runSapSession(3)">ZRMA Q2</button>
+    <input type="text" id="excelRangeSheet" placeholder="시트명 (예: 8-6)" size="10">
+    <input type="number" id="excelRangeStart" placeholder="시작행" min="1" style="width:5em">
+    <input type="number" id="excelRangeEnd" placeholder="종료행" min="1" style="width:5em">
+    <button class="btn block" onclick="importExcelRange()" title="위 시트의 지정한 행 범위만 1회성으로 workbench.db에 불러옵니다 - 비상시에만 사용">3. 엑셀에서 범위 불러오기 (비상용)</button>
+  </div>
+</div>
+<div class="flag-filter-bar" id="flagFilterBar">
+  <span id="ffChips" class="ff-chips"></span>
+  <span class="ff-sep"></span>
+  <span class="ff-act"><button class="btn block primary" onclick="processDone()" title="체크된 행 전체 완료 (파랑)">Done</button><button class="btn block warn" onclick="processPickupReady()" title="체크된 회수만 대기 (빨강), 나머지 완료">Ready</button><button class="btn block muted" onclick="processCancel()" title="체크된 행 전체 취소 (회색) - 행 전체에 표시, 삭제되지는 않음">Cancel</button><button class="btn block" onclick="processReset()" title="체크된 행을 Done/Ready/Cancel 이전 상태(흰색)로 되돌림 - 잘못 완료 처리됐거나 아직 진행 안 된 행을 표시 없는 상태로 초기화">초기화</button><button class="btn block billed tiny" onclick="processBilled()" title="회수 오더가 안 돼서 고객에게 비용을 청구한 상태로 표시 (초록) - 마감 파일엔 들어가지만 대시보드 수량에는 집계되지 않음">billed</button></span>
+  <span class="ff-hist"><input id="histQ" type="search" placeholder="이력 검색" autocomplete="off" spellcheck="false" title="오더번호 / 시리얼 / 고객 등으로 예전 배송 이력 조회"></span>
+  <span class="ff-forms"><label class="ff-chk" title="켜 두면 'Serial 등록 & QR 인쇄' 때 ZOR 오더의 POD(배송 서명 용지)도 자동 인쇄됩니다. [인쇄] 버튼에서도 이 칸이 켜져 있어야 POD가 인쇄됩니다."><input type="checkbox" id="chk_pod">pod</label><label class="ff-chk" title="[인쇄] 시 체크한 ZRE(회수) 오더의 POC(회수 서명 용지, 고객용+우리용)를 인쇄합니다."><input type="checkbox" id="chk_poc">poc</label><button type="button" class="btn ff-formbtn" onclick="printSignForms()" title="체크한 오더 행의 서명 용지 인쇄 (pod=ZOR 배송, poc=ZRE 회수 · 교체 ZRX/내부배송 제외)">인쇄</button></span>
+  <span class="ff-spacer"></span>
+  <button type="button" class="ff-ico ff-quick" onclick="openQuickPrint()" title="퀵 기사님 안내문 인쇄 - 체크한 행을 퀵으로 보낼 때">퀵</button>
+  <button type="button" class="ff-ico" onclick="undoLastAction()" title="실행취소 (Ctrl+Z) - 삭제/날짜이동/완료처리를 최근 20건까지 되돌림">↶</button>
+  <button type="button" class="ff-ico" onclick="redoLastAction()" title="다시실행 (Ctrl+Shift+Z 또는 Ctrl+Y) - 방금 실행취소한 작업을 다시 적용">↷</button>
+  <button type="button" class="ff-ico" onclick="openTrash()" title="삭제된 항목 보기 (휴지통) - 7일 안이면 복구 가능">🗑</button>
+</div>
+</div>
+
+<div id="trashOverlay" class="trash-overlay">
+  <div class="trash-panel">
+    <div class="trash-header">
+      <h3>삭제된 항목 (7일간 보관 후 완전 삭제)</h3>
+      <button class="btn" onclick="closeTrash()">닫기</button>
+    </div>
+    <button class="btn block primary" onclick="restoreCheckedTrash()">선택 항목 복구</button>
+    <div id="trashList" class="trash-list"></div>
+  </div>
+</div>
+
+<!-- 2026-08-20: 메모 행 추가 모달 - 오더 가져오기 없이 텍스트만으로 board에
+     새 행을 만드는 기능(사용자 요청). order#는 항상 빈 값으로 저장되고
+     (add_manual_note() 참고 - 실제 오더와 안 헷갈리게), 구분/날짜는 여기서
+     사용자가 직접 선택. trash-overlay와 같은 오버레이 패턴 재사용.
+     2026-08-25: 내용 칸이 원래 Item(description) 하나뿐이었는데, 사용자
+     요청으로 Type/check/Order#를 제외한 나머지 7칸(Item/M-N/S-N/Customer/
+     Phone/Address/Memo) 전부를 자유롭게 쓸 수 있게 바꿈 - 메모 행은 실제
+     오더가 아니라서 그 7칸에 각각 "무엇을 적어야 하는지" 강제할 이유가
+     없다는 게 요청 취지. 다만 처음부터 7칸을 다 보여주면 오히려 복잡해
+     보이므로(사용자 지적), 몇 칸을 쓸지 먼저 고르면 그 수만큼만 렌더링 -
+     renderManualRowCells() 참고. -->
+<div id="manualRowOverlay" class="trash-overlay">
+  <div class="trash-panel" style="max-width:420px">
+    <div class="trash-header">
+      <h3>메모 행 추가</h3>
+      <button class="btn" onclick="closeManualRowModal()">닫기</button>
+    </div>
+    <label style="display:block;margin-bottom:10px;font-size:13px;color:var(--muted,#555)">Order# (선택 - 비워두면 "memo"로 표시됨)
+      <input type="text" id="manualRowOrderLabel" placeholder="예: SDSK1333608359" style="display:block;width:100%;margin-top:4px;padding:6px 8px;box-sizing:border-box">
+    </label>
+    <label style="display:block;margin-bottom:10px;font-size:13px;color:var(--muted,#555)">몇 칸을 쓸까요? (제목/M-N/S-N/Customer/Phone/Address/Memo 중 앞에서부터 - 기본값은 일반 오더와 같은 7칸 전부, 필요하면 줄여서 몇 칸만 합쳐 쓸 수 있음)
+      <input type="number" id="manualRowCellCount" min="1" max="7" value="7" style="width:70px;margin-left:8px;padding:4px 6px;box-sizing:border-box" onchange="renderManualRowCells()">
+    </label>
+    <div id="manualRowCells" style="margin-bottom:4px"></div>
+    <label style="display:block;margin:10px 0;font-size:13px;color:var(--muted,#555)">구분
+      <select id="manualRowType" style="width:100%;margin-top:4px;padding:6px 8px;box-sizing:border-box"></select>
+    </label>
+    <label style="display:block;margin-bottom:14px;font-size:13px;color:var(--muted,#555)">날짜
+      <input type="date" id="manualRowDate" style="width:100%;margin-top:4px;padding:6px 8px;box-sizing:border-box">
+    </label>
+    <div style="text-align:right">
+      <button class="btn" onclick="closeManualRowModal()">취소</button>
+      <button class="btn primary" onclick="submitManualRow()">추가</button>
+    </div>
+  </div>
+</div>
+
+<div class="board-wrap">
+  <table class="board-table" id="boardTable">
+    <thead><tr>
+      <th></th><th>Type</th><th>check</th><th>Order #</th><th>Item</th><th>M/N</th><th>S/N</th>
+      <th>Customer</th><th>Phone</th><th>Address</th><th>Memo</th>
+    </tr></thead>
+  </table>
+</div>
+
+<aside id="sideCol" class="side-col">
+  <div class="side-head"><b>달력 · 메모 · 도구</b><button type="button" id="sideToggle" class="side-toggle" onclick="toggleSideCol()" title="오른쪽 열 접기/펼치기">▸</button></div>
+  <div class="side-body">
+    <div class="side-sec"><div id="sideCal"></div></div>
+    <div class="side-sec">
+      <h4><span>메모 <i id="sideMemoCount"></i></span><button type="button" class="pin-open" onclick="togglePinPanel()" title="고정 메모 (탭별 기록)">📌</button></h4>
+      <textarea id="sideMemoNew" class="sm-new" placeholder="메모 (Enter 저장, Ctrl+M)"></textarea>
+      <input id="sideMemoQ" class="sm-q" placeholder="검색">
+      <div id="sideMemoList"></div>
+    </div>
+    <div class="side-sec tools">
+      <h4>SAP</h4>
+      <div class="srow"><button class="btn block" onclick="runSap('all')" title="2. SAP 전체 조회">전체조회</button><button class="btn block warn" onclick="runSap('stop')" title="SAP 자동루프 중지 - 콘솔 창이 없어서(2026-08-25) 더 이상 창을 닫아서 멈출 수 없음 - 대신 이 버튼으로 중지. 워치독이 되살리지 않도록 표시해두고, 다시 켜려면 왼쪽 Start&Loop를 누르면 됨">루프중지</button><button class="btn block" onclick="runSap('start')" title="1. SAP Start & Loop">Start&amp;Loop</button></div>
+      <div class="srow"><button class="btn block" onclick="runZrecPrepare()" title="5. ZREC 처리 (ZIH08 조회 → 표로 확인 → 자동 Receive) - 체크된(Ready to process) 회수 항목의 시리얼을 ZIH08에 한 번에 조회 → 오더번호/M-N/S-N/수량/아이템명 표를 확인창 하나로 모아 보여줌 → 확인을 누르면 항목마다 순서대로 자동으로 Receive Equipment 클릭(실제 SAP 접수! 중간 팝업 없음) → 전체 끝나면 ZIH08로 6507/0052 접수 확인까지, 확인된 항목은 파란색(완료)으로 자동 전환">ZREC 처리</button><button class="btn block" onclick="runSnReloBatch()" title="4-2. S/N 오더 반영 시도 (X→실제 S/N, paper relo 판별) - S/N칸에 실제 회수된 S/N을 먼저 입력해두고 체크 - 오더 원본(VA02)에 그 S/N을 입력·저장 시도합니다. 저장되면 firm/cust 일치 → 이어서 5번 ZREC 처리 가능. 저장 안 되면(에러) firm/cust 불일치로 paper relo 필요 - 항목에 ⚠ 표시됩니다.">S/N 오더 반영 시도</button></div>
+      <details class="side-det"><summary>SAP 도구</summary>
+        <div class="ctrl-inline"><button class="btn" onclick="runOrderNoAction()">오더 수집</button><input id="orderNoInput" placeholder="오더번호" onkeydown="if(event.key==='Enter'){event.preventDefault();runOrderNoAction();}"></div>
+        <div class="ctrl-inline"><button class="btn" onclick="runOrderJumpAction()">오더 조회</button><input id="orderJumpInput" placeholder="오더번호" onkeydown="if(event.key==='Enter'){event.preventDefault();runOrderJumpAction();}"></div>
+        <div class="ctrl-inline"><button class="btn" onclick="runSerialLookupAction()">SN 조회</button><input id="serialLookupInput" placeholder="Serial Number" onkeydown="if(event.key==='Enter'){event.preventDefault();runSerialLookupAction();}"></div>
+        <div class="ctrl-inline"><button class="btn" onclick="runNewSessionAction()">SAP Tab+</button><input id="tcodeInput" placeholder="T-code (선택)" onkeydown="if(event.key==='Enter'){event.preventDefault();runNewSessionAction();}"></div>
+      </details>
+    </div>
+    <div class="side-sec tools">
+      <h4>Bloomberg Portal</h4>
+      <div class="srow"><button class="btn block" onclick="openPortalLoginManual()" title="Chrome만 열림 - 자동입력/자동클릭 없음, 직접 로그인+B-Unit 인증. 켜둔 채로 재사용됨">Portal 로그인 (수동)</button><button class="btn block" onclick="runLatestZpl()" title="Downloads 폴더에서 가장 최근 .ZPL/.zpl(또는 PDF 라벨)을 찾아 Zebra 프린터로 바로 전송">최근 ZPL 수동 인쇄</button></div>
+      <div class="srow"><button class="btn block primary" onclick="runPortalBatch()" title="체크된 행의 오더별로 확인창 후 하나씩 순서대로 실행 (동시 실행 안 함)">Serial 등록 &amp; QR 인쇄</button><button class="btn block" onclick="runPodBatch()" title="체크된 행 기준으로 Portal POD(배송완료) 처리 - 배송만 체크하면 배송만, 배송+회수 둘 다 체크하면 둘 다 완료로 저장. 오더별 미리보기 확인 후 저장">POD (배송완료) 처리</button><button class="btn block" onclick="runSpareOneshot()" title="누르면 POD 내용 확인창이 먼저 뜨고, 확인하면 Serial 등록부터 POD(배송완료) 저장까지 중간 팝업 없이 한 번에 진행 (QR 인쇄는 생략)">스페어 배송처리 (serial+POD처리)</button></div>
+    </div>
+    <div class="side-sec tools">
+      <h4>Excel</h4>
+      <div class="srow"><button class="btn block finish" onclick="finalizeChecked()" title="날짜 줄의 체크박스를 누르면 그 날짜의 행이 전부 기본 체크됨 - 아직 해결 안 된 행은 체크만 해제하면 이번 마감에서 빠지고 보드에 그대로 남음(며칠 뒤 그 행만 체크해서 마감하면 원래 날짜의 시트 맨 아래에 이어붙음). 엑셀 저장이 성공해야만 workbench.db에서도 삭제됨">마감 (내보내기 + 삭제)</button><button class="btn block" onclick="printChecked()" title="날짜 줄의 체크박스(날짜 전체) 또는 행 체크박스(오더 단위, 한쪽 leg만 체크해도 같은 오더 전체가 인쇄됨)로 선택 - A4 가로, 흑백">배송장 인쇄</button></div>
+      <div class="srow"><button type="button" class="btn block" onclick="openQuickPrint()" title="체크한 행으로 퀵 기사님께 드릴 안내문(A4)을 미리보고 인쇄합니다">퀵 기사님 안내문 인쇄</button></div>
+      <details class="side-det"><summary>월초</summary>
+        <div class="srow"><button class="btn block" onclick="runQuickSettlement()" title="월초 작업 1) 퀵 금액 정리 - 퀵회사 월 내역서 + 배송장 마감 파일의 퀵/Taxi/우체국 memo를 대조해 '2026-퀵 快递明细表.xlsx'에 월별 시트를 만듭니다. 먼저 사본에 미리보기를 만들어 결과를 보여주고, 확인하면 원본에 반영(원본은 자동 백업). 정리 코드: quick_settlement 저장소">월초: 퀵 금액 정리</button></div>
+      </details>
+    </div>
+  </div>
+  <div class="side-rail">
+    <button type="button" onclick="toggleSideCol()" title="달력 열기">달력</button>
+    <button type="button" onclick="openSideMemo()" title="빠른 메모 (Ctrl+M)">메모</button>
+  </div>
+</aside>
+
+<div id="printArea"></div>
+
+<script>
+//#include dashboard/01_core_status.js
+//#include dashboard/02_pod_portal.js
+//#include dashboard/03_zrec.js
+//#include dashboard/04_board_model.js
+//#include dashboard/05_render_rows.js
+//#include dashboard/06_persistence.js
+//#include dashboard/07_status_undo.js
+//#include dashboard/08_finalize_init.js
+//#include dashboard/09_side_panel.js
+</script>
+</body>
+</html>

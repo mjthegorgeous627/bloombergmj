@@ -38,6 +38,7 @@ _INDEX_LOCK = threading.Lock()
 _ORDER_RE = re.compile(r"(?<!\d)(\d{7,9})(?!\d)")
 _MD_RE = re.compile(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일")
 _DASH_RE = re.compile(r"(?:(\d{4})[-./])?(\d{1,2})[-./](\d{1,2})")
+_DASH_LOOSE_RE = re.compile(r"(?<!\d)(\d{1,2})\s*[-./]\s*(\d{1,2})(?!\d)")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sheets (
@@ -107,6 +108,12 @@ def _parse_sheet_date(title, sheet_name, file_year, sheet_idx):
             year = int(m.group(1)) if m.group(1) else None
             month, day = int(m.group(2)), int(m.group(3))
             break
+    if not month and sheet_name:
+        # 2026-10-15: "10 -12", "6- 13"처럼 숫자 사이에 공백이 낀 시트명(2017~2018 파일에 많음).
+        # 제목(A1)에서는 오탐 위험이 있어 시트명에만 느슨한 규칙을 쓴다.
+        m = _DASH_LOOSE_RE.match(sheet_name.strip()) or _DASH_LOOSE_RE.search(sheet_name)
+        if m:
+            month, day = int(m.group(1)), int(m.group(2))
     if not month or not day or not (1 <= month <= 12 and 1 <= day <= 31):
         return None
     if year is None:
@@ -372,6 +379,156 @@ def restore_to_workbench(row_ids, target_date=None):
         )
         created.append(res["orderId"])
     return {"restored": len(created), "orderIds": created}
+
+
+def day_detail(date_iso):
+    """달력에서 마감된 과거 날짜를 눌렀을 때: 그 날짜의 시트(들)와 행 전체."""
+    conn = _connect()
+    try:
+        out = []
+        for sh in conn.execute("SELECT * FROM sheets WHERE sheet_date=? ORDER BY id", (date_iso,)).fetchall():
+            rows = conn.execute(
+                "SELECT * FROM rows WHERE sheet_id=? ORDER BY excel_row", (sh["id"],)
+            ).fetchall()
+            out.append({
+                "sheetId": sh["id"],
+                "sheetName": sh["sheet_name"],
+                "sourceFile": Path(sh["source_file"]).name,
+                "rows": [_row_dict(r) for r in rows],
+            })
+        return {"date": date_iso, "sheets": out}
+    finally:
+        conn.close()
+
+
+_EDIT_LOCK = threading.Lock()
+
+
+def _open_workbook_com(path: str):
+    """이미 열려 있으면 그 통합문서에 붙고, 아니면 숨김 Excel로 연다. (wb, 정리함수) 반환."""
+    import os
+    import win32com.client
+
+    try:
+        wb = win32com.client.GetObject(os.path.abspath(path))   # 사용자가 열어둔 파일(ROT)
+        if getattr(wb, "Name", None):
+            return wb, (lambda: None)
+    except Exception:
+        pass
+    xl = win32com.client.DispatchEx("Excel.Application")
+    xl.Visible = False
+    xl.DisplayAlerts = False
+    try:
+        wb = xl.Workbooks.Open(os.path.abspath(path), UpdateLinks=0)
+    except Exception:
+        xl.Quit()
+        raise
+
+    def cleanup():
+        try:
+            wb.Close(SaveChanges=False)
+        finally:
+            xl.Quit()
+
+    return wb, cleanup
+
+
+def update_cells(edits):
+    """이력 화면에서 고친 셀만 원본 엑셀에 반영한다(시트 전체를 다시 쓰지 않음).
+
+    edits: [{rowId, col(0부터), value}]. 엑셀의 현재 값이 색인해 둔 값과 다르면
+    (그 사이 누가 고쳤거나 행이 밀린 경우) 덮어쓰지 않고 conflict로 돌려준다.
+    성공하면 history.db도 같은 값으로 갱신하고 index_state를 새 파일 상태로 맞춰
+    불필요한 전체 재색인을 피한다.
+    """
+    import json as _json
+    from order_lock import ExcelWriteLock
+
+    results = []
+    todo = {}   # source_file -> sheet_name -> [(rowId, excel_row, col, old, new)]
+    conn = _connect()
+    try:
+        for e in edits or []:
+            rid, col, new = int(e.get("rowId")), int(e.get("col")), str(e.get("value") if e.get("value") is not None else "")
+            r = conn.execute(
+                "SELECT r.*, s.sheet_name, s.source_file FROM rows r JOIN sheets s ON s.id=r.sheet_id WHERE r.id=?", (rid,)
+            ).fetchone()
+            if not r or not (0 <= col < _MAX_COLS):
+                results.append({"rowId": rid, "col": col, "ok": False, "error": "대상 행을 찾을 수 없음"})
+                continue
+            cells = _json.loads(r["cells_json"])
+            old = cells[col] if col < len(cells) else ""
+            todo.setdefault(r["source_file"], {}).setdefault(r["sheet_name"], []).append((rid, r["excel_row"], col, old, new))
+    finally:
+        conn.close()
+
+    with _EDIT_LOCK:
+        for path, sheets in todo.items():
+            done = []   # 엑셀에 실제로 쓴 것
+            wb = cleanup = None
+            try:
+                if path not in {str(p) for p in source_files()}:
+                    raise RuntimeError("원본 파일을 찾을 수 없음")
+                with ExcelWriteLock():
+                    wb, cleanup = _open_workbook_com(path)
+                    if wb.ReadOnly:
+                        raise RuntimeError("엑셀 파일이 읽기 전용으로 열려 있어 저장할 수 없음 (다른 사람이 쓰는 중일 수 있음)")
+                    for sheet_name, items in sheets.items():
+                        ws = wb.Worksheets(sheet_name)
+                        for rid, xr, col, old, new in items:
+                            cell = ws.Cells(xr, col + 1)
+                            cur = _cell_text(cell.Value)
+                            if cur != old:
+                                results.append({"rowId": rid, "col": col, "ok": False, "conflict": True,
+                                                "error": "엑셀의 현재 값이 달라서 덮어쓰지 않았습니다 (현재: %s)" % cur[:40]})
+                                continue
+                            if new == old:
+                                results.append({"rowId": rid, "col": col, "ok": True})
+                                continue
+                            cell.Value = new if new != "" else None
+                            done.append((rid, col, new))
+                            results.append({"rowId": rid, "col": col, "ok": True})
+                    if done:
+                        wb.Save()
+            except Exception as exc:
+                logger.error("history edit failed: %s", path, exc_info=True)
+                results = [x for x in results if not any(x["rowId"] == d[0] and x["col"] == d[1] for d in done)]
+                done = []
+                for items in sheets.values():
+                    for rid, xr, col, old, new in items:
+                        if not any(x["rowId"] == rid and x["col"] == col for x in results):
+                            results.append({"rowId": rid, "col": col, "ok": False, "error": str(exc)[:120]})
+            finally:
+                if cleanup:
+                    try:
+                        cleanup()
+                    except Exception:
+                        pass
+            if done:
+                conn = _connect()
+                try:
+                    for rid, col, new in done:
+                        r = conn.execute("SELECT * FROM rows WHERE id=?", (rid,)).fetchone()
+                        cells = _json.loads(r["cells_json"])
+                        while len(cells) <= col:
+                            cells.append("")
+                        cells[col] = new
+                        while cells and not cells[-1]:
+                            cells.pop()
+                        first = cells[0] if cells else ""
+                        m = _ORDER_RE.search(first)
+                        conn.execute(
+                            "UPDATE rows SET cells_json=?, search_text=?, kind=?, order_no=? WHERE id=?",
+                            (_json.dumps(cells, ensure_ascii=False), " | ".join(c for c in cells if c).lower(),
+                             _kind_of(first) if col == 0 else r["kind"], (m.group(1) if m else "") if col == 0 else r["order_no"], rid),
+                        )
+                    st = Path(path).stat()
+                    conn.execute("UPDATE index_state SET mtime=?, size=?, indexed_at=datetime('now','localtime') WHERE source_file=?",
+                                 (st.st_mtime, st.st_size, path))
+                    conn.commit()
+                finally:
+                    conn.close()
+    return {"results": results}
 
 
 def stats():
