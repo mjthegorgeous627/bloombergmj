@@ -345,14 +345,35 @@ def add_manual_note(cells, target_date=None, item_type=None, order_label=None, c
             (order_label, customer, phone, address, memo, target_date, now_text(), now_text(), cell_count),
         )
         order_id = cur.lastrowid
-        con.execute(
-            """
-            INSERT INTO order_items(order_id, line_no, description, material, serial, qty, mode, item_type, item_date, board_status)
-            VALUES (?, 1, ?, ?, ?, 1, 'material_only', ?, ?, '')
-            """,
-            (order_id, description, material, serial, item_type, target_date),
-        )
+        # S/N(과 MN)이 여러 줄이면 보드의 다른 오더처럼 S/N 하나당 한 줄(item)로 만든다. MN은 같은 순서로 매칭(모자라면 마지막 값 반복 없이 빈칸).
+        NL_ = chr(10)
+        sn_lines = [x.strip() for x in serial.split(NL_) if x.strip()]
+        mn_lines = [x.strip() for x in material.split(NL_)]
+        created_ids = []
+        if len(sn_lines) > 1:
+            for k, sn_k in enumerate(sn_lines):
+                mn_k = mn_lines[k] if k < len(mn_lines) else (mn_lines[0] if len(set(mn_lines)) == 1 and mn_lines else "")
+                icur = con.execute(
+                    """
+                    INSERT INTO order_items(order_id, line_no, description, material, serial, qty, mode, item_type, item_date, board_status)
+                    VALUES (?, ?, ?, ?, ?, 1, 'material_only', ?, ?, '')
+                    """,
+                    (order_id, k + 1, description if k == 0 else "", mn_k, sn_k, item_type, target_date),
+                )
+                created_ids.append(icur.lastrowid)
+        else:
+            icur = con.execute(
+                """
+                INSERT INTO order_items(order_id, line_no, description, material, serial, qty, mode, item_type, item_date, board_status)
+                VALUES (?, 1, ?, ?, ?, 1, 'material_only', ?, ?, '')
+                """,
+                (order_id, description, material, serial, item_type, target_date),
+            )
+            created_ids.append(icur.lastrowid)
         add_event(con, order_id, f"수동 메모 행 추가 ({item_type}): {description}")
+        # Ctrl+Z 지원(2026-10-16): 새 행도 실행취소 기록에 남긴다. undo는 'delete' 기록의 prev_value(=deleted_at)를 복원하므로,
+        # "지금 시각"을 prev로 넣으면 실행취소 = 이 행 숨김(소프트 삭제), 다시실행(Ctrl+Y) = 다시 보임.
+        _log_action_batch(con, "delete", f"새 행 추가 ({order_label})", [(i, now_text()) for i in created_ids])
     return {"orderId": order_id}
 
 

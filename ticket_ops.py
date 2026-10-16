@@ -81,6 +81,16 @@ def ticket_handle(key, result, to=None, due=None):
     return ticket_store.handle(str(key or ""), result, to, due)
 
 
+def ticket_regroup(key, instruction):
+    sys.path.insert(0, os.path.join(BASE_DIR, "tickets"))
+    import ticket_regroup
+    return {"card": ticket_regroup.regroup(str(key or ""), instruction)}
+
+
+def ticket_reopen(key):
+    return ticket_store.reopen(str(key or ""))
+
+
 def ticket_set_due(key, due):
     return ticket_store.set_due(str(key or ""), due)
 
@@ -139,7 +149,8 @@ def ticket_apply(p):
         label = (n.get("order_no") or "").strip() or ("SDSK " + str(p.get("ticket") or ""))
         title = (n.get("item") or "").strip() or label
         with items.connect() as con:
-            dup = con.execute("SELECT id FROM orders WHERE order_no='' AND order_type=?", (label,)).fetchone()
+            dup = con.execute("SELECT o.id FROM orders o JOIN order_items i ON i.order_id=o.id "
+                               "WHERE o.order_no='' AND o.order_type=? AND i.deleted_at IS NULL", (label,)).fetchone()
         if dup:
             return {"applied": False, "message": f"이미 '{label}' 행이 배송장에 있습니다 (행 {dup['id']}). 새로 만들지 않았습니다. Memo에 반영으로 내용을 덧붙이세요."}
         if not (n.get("date") or "").strip():

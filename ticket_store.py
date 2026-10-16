@@ -192,6 +192,30 @@ def watching():
     return sorted([_row(r) for r in rows], key=lambda d: (d["due_eff"] == "", d["due_eff"]))
 
 
+def set_proposal(key, todo, board, due=None):
+    """'다시 정리' 결과: TO DO와 배송장 제안만 바꾼다(글/이력은 그대로)."""
+    board = board if isinstance(board, dict) and board.get("action") else None
+    with _con() as con:
+        con.execute("UPDATE tickets SET todo=?, board=? WHERE key=?",
+                    (todo or "", json.dumps(board, ensure_ascii=False) if board else None, key))
+        if due and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(due)):
+            con.execute("UPDATE tickets SET due=? WHERE key=?", (due, key))
+        r = con.execute("SELECT * FROM tickets WHERE key=?", (key,)).fetchone()
+    return _row(r)
+
+
+def reopen(key):
+    """보관함/완료함 카드를 '처리할 것'으로 되돌린다(잘못 눌렀을 때)."""
+    with _con() as con:
+        r = con.execute("SELECT history FROM tickets WHERE key=?", (key,)).fetchone()
+        if not r:
+            raise ValueError("티켓 기록을 찾을 수 없습니다.")
+        h = _j(r[0], [])
+        h.append({"result": "되돌림", "at": _now()})
+        con.execute("UPDATE tickets SET state='pending', history=?, updated_at=? WHERE key=?", (json.dumps(h, ensure_ascii=False), _now(), key))
+    return {"state": "pending"}
+
+
 def set_due(key, due):
     """보관함/처리할 것 카드의 '할 일 날짜' 저장(빈 값이면 날짜 없음)."""
     due = str(due or "")

@@ -85,6 +85,7 @@ async function _applyTicketProposal(p, btn, skipBtn){
     const data=await res.json();
     if(!res.ok||data.error) throw new Error(data.error||'실패');
     toast(data.message);
+    if(data.applied===false){ btn.disabled=false; return false; }
     return true;
   }catch(err){ btn.disabled=false; toast('적용 실패: '+err.message); return false; }
 }
@@ -106,6 +107,41 @@ function _tkWithDate(b,di){
   if(b.action==='new_row') return Object.assign({},b,{new_row:Object.assign({},b.new_row,{date:v})});
   if(b.action==='set_date' && v) return Object.assign({},b,{date:v});
   return b;
+}
+function _tkReopenBtn(it, card, opts){
+  const x=document.createElement('button'); x.className='btn'; x.textContent='처리할 것으로'; x.title='잘못 옮겼을 때 처리할 것 탭으로 되돌립니다 (배송장에 이미 반영한 내용은 되돌려지지 않습니다)';
+  x.onclick=async()=>{ try{ const r=await fetch('/api/tickets/reopen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key})}); const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'실패'); card.style.transition='opacity .25s'; card.style.opacity='0'; setTimeout(()=>{ card.remove(); if(opts.onChange) opts.onChange(); if(window._tkRefreshPending) window._tkRefreshPending(); },260); toast('처리할 것으로 되돌렸습니다'); }catch(err){ toast('되돌리기 실패: '+err.message); } };
+  return x;
+}
+function _tkProposalBox(it, b, card, opts){
+  // 배송장에 만들 행 미리보기(읽기 전용) + 고칠 점을 말로 적는 한 줄. [다시 정리]는 저장된 티켓 글로 제안만 다시 만든다(터미널 안 씀)
+  const wrap=document.createElement('div'); wrap.style.cssText='margin:8px 0;padding:8px 10px;background:#f6f8fa;border-radius:6px;font-size:13px';
+  const n=b&&b.action==='new_row'?(b.new_row=b.new_row||{}):null;
+  if(n){
+    const head=document.createElement('div'); head.style.cssText='color:#555;margin-bottom:4px'; head.textContent='새 행 미리보기  (Order# SDSK '+it.key+')'; wrap.appendChild(head);
+    const line=(label,node)=>{ const r=document.createElement('div'); r.style.cssText='display:flex;gap:10px;margin:2px 0'; const l=document.createElement('span'); l.style.cssText='flex:none;width:56px;color:#777'; l.textContent=label; r.appendChild(l); node.style.flex='1'; r.appendChild(node); wrap.appendChild(r); };
+    const sel=document.createElement('select'); sel.style.cssText='flex:none;width:auto;padding:1px 4px'; const cur=n.type||'배송';
+    ['배송','회수','업무'].concat(['배송','회수','업무'].includes(cur)?[]:[cur]).forEach(v=>{ const o=document.createElement('option'); o.value=o.textContent=v; if(v===cur) o.selected=true; sel.appendChild(o); });
+    n.type=sel.value; sel.onchange=()=>{ n.type=sel.value; };
+    const sw=document.createElement('span'); sw.appendChild(sel); line('Type',sw);
+    [['품목','item'],['MN','mn'],['S/N','sn'],['받는 곳','customer'],['주소','address'],['메모','memo']].forEach(([lab,k])=>{
+      let v=String(n[k]||''); if(k==='sn'||k==='mn') v=v.replace(/\s*,\s*/g,String.fromCharCode(10)); if(!v) return;
+      const sp=document.createElement('span'); sp.style.whiteSpace='pre-wrap'; sp.textContent=v; line(lab,sp); if(k==='sn'||k==='mn') n[k]=v; });
+  }
+  const row=document.createElement('div'); row.style.cssText='display:flex;gap:6px;margin-top:6px';
+  const inp=document.createElement('input'); inp.placeholder='(선택) 고칠 점이 있으면 말로 적으세요  예) 서울오피스 리턴함 픽업, 회수 행, S/N 한 줄씩, 날짜 10/20'; inp.style.cssText='flex:1;min-width:0;padding:4px 6px;font:inherit';
+  const bt=document.createElement('button'); bt.className='btn'; bt.textContent='다시 정리'; bt.title='저장된 티켓 내용과 이 지시로 TO DO·배송장 제안을 다시 만듭니다 (약 1분, 터미널 사용 안 함)';
+  const go=async()=>{
+    bt.disabled=true; inp.disabled=true; bt.textContent='정리 중…';
+    try{
+      const r=await fetch('/api/tickets/regroup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key,instruction:inp.value})});
+      const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'실패');
+      const tmp=document.createElement('div'); _ticketCards(tmp,[d.card],opts); card.replaceWith(tmp.firstChild); toast('다시 정리했습니다');
+    }catch(err){ toast('다시 정리 실패: '+err.message); bt.disabled=false; inp.disabled=false; bt.textContent='다시 정리'; }
+  };
+  bt.onclick=go; inp.onkeydown=(ev)=>{ if(ev.key==='Enter'){ ev.preventDefault(); go(); } };
+  row.appendChild(inp); row.appendChild(bt); wrap.appendChild(row);
+  return wrap;
 }
 function _tkEl(tag, css, txt){ const e=document.createElement(tag); if(css) e.style.cssText=css; if(txt!=null) e.textContent=txt; return e; }
 function _ticketCards(box, items, opts){
@@ -174,6 +210,7 @@ function _ticketCards(box, items, opts){
       rs.onclick=async()=>{ if(!window.confirm('Done(완료함)으로 옮길까요?\n해결(Resolved)·종료(Closed)되었거나 내가 더 확인하지 않아도 되는 티켓입니다.')) return;
         try{ const r=await fetch('/api/tickets/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key})}); const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'실패'); card.style.transition='opacity .25s'; card.style.opacity='0'; setTimeout(()=>{ card.remove(); if(opts.onChange) opts.onChange(); },260); }catch(err){ toast('저장 실패: '+err.message); } };
       const wb=it.board&&it.board.action&&it.board.action!=='none' ? it.board : null;
+      card.appendChild(_tkProposalBox(it,wb,card,opts));
       if(wb){
         const lab={append_memo:'Memo에 반영',set_date:'날짜 반영',new_row:'새 행 반영'}[wb.action]||'배송장에 반영';
         const mb=document.createElement('button'); mb.className='btn'; mb.textContent=lab;
@@ -181,12 +218,13 @@ function _ticketCards(box, items, opts){
         mb.onclick=async()=>{ if(wb.action==='new_row'&&!wdate.value){ toast('날짜를 먼저 입력하세요'); wdate.focus(); return; } if(await _applyTicketProposal(Object.assign({ticket:it.key},_tkWithDate(wb,wdate)),mb,mb)){ try{ const r=await fetch('/api/tickets/recheck',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key,result:'Memo 반영'})}); const d=await r.json(); const a3=_tkAgo(d.at); stamp.style.color=SUB; stamp.textContent='마지막 확인  '+a3.txt+'  (오늘)  ·  배송장에 반영함'; mb.disabled=false; }catch(e){} } };
         bar.appendChild(mb);
       }
-      bar.appendChild(ok); bar.appendChild(rs);
+      bar.appendChild(ok); bar.appendChild(rs); bar.appendChild(_tkReopenBtn(it,card,opts));
     } else if(opts.archived){
       const h=(it.history||[]).map(x=>String(x.at||'').replace('T',' ').slice(5,16)+' '+x.result).join('  ·  ');
-      bar.appendChild(_tkEl('span','color:'+SUB,'처리 이력: '+(h||'-')));
+      bar.appendChild(_tkEl('span','flex:1 1 200px;color:'+SUB,'처리 이력: '+(h||'-'))); bar.appendChild(_tkReopenBtn(it,card,opts));
     } else {
       const b=it.board&&it.board.action&&it.board.action!=='none' ? it.board : null;
+      card.appendChild(_tkProposalBox(it,b,card,opts));
       bar.appendChild(_tkEl('span','flex:1 1 200px',(!b&&reflected)?'배송장에 반영함':b?('배송장에 반영: '+String(b.question||'').replace(/\s*(하겠습니까|할까요)\?/,'')+(b.row_label?('  ('+b.row_label+')'):'')):''));
       const initD=it.due||it.due_auto||(b&&((b.new_row&&b.new_row.date)||(b.action==='set_date'&&b.date)))||'';
       const dateIn=_tkDateInput(initD, !!(b&&b.action==='new_row'));

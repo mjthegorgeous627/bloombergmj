@@ -67,6 +67,11 @@ def main():
                 with open(os.path.join(HERE, "CHECK_PROMPT.md"), "r", encoding="utf-8") as fh:
                     prompt = fh.read()
                 # 이미 저장소에 있는 티켓 표(마지막 글 번호/시각/처리 여부)를 넘겨서, 새 글이 없는 티켓은 열지 않게 한다
+                try:
+                    with open(os.path.join(HERE, "PLAYBOOK.md"), "r", encoding="utf-8") as fp_:
+                        prompt += chr(10) * 2 + fp_.read()
+                except Exception:
+                    pass
                 known = ticket_store.known_summary()
                 NL0 = chr(10)
                 prompt += (NL0 * 2 + "## 이미 아는 티켓 (저장소 기준)" + NL0
@@ -86,6 +91,7 @@ def main():
                                    "각 번호마다 `read <번호>`로 본문 전체(#1 글 포함)를 읽어 정리한다(번호로 직접 들어가며 `open`은 쓰지 않는다). "
                                    "이미 아는 티켓이어도 이번에는 #1 정리글과 흐름 이해에 필요한 글, 알아야 할 정보를 모두 posts에 넣고, 이전에 본 글은 new:false, 이번에 새로 알게 된 최신 글만 new:true로 한다. 티켓 번호: " + ", ".join(nums)
                                    + ". 일반 메일은 이번에는 열지 않는다." + NL)
+
                 cmd = [CLAUDE_EXE, "-p", "--permission-mode", "dontAsk", "--output-format", "text",
                        "--add-dir", IMG_DIR, "--allowedTools"] + ALLOWED
                 proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",

@@ -349,7 +349,7 @@ def workbench_force_restart():
         "$_.CommandLine -match 'workbench_app\\.py' } | "
         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
         "Start-Sleep -Milliseconds 500; "
-        f"Start-Process -FilePath '{pythonw}' -ArgumentList 'workbench_app.py' -WorkingDirectory '{BASE_DIR}'"
+        f"Start-Process -FilePath '{pythonw}' -ArgumentList 'workbench_app.py --page v2' -WorkingDirectory '{BASE_DIR}'"
     )
     try:
         subprocess.Popen(

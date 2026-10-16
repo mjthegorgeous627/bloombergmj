@@ -357,11 +357,34 @@ class Handler(BaseHTTPRequestHandler):
                 body = self.read_json()
                 self.send_json(unmerge_orders(body.get("itemIds") or [], body.get("fields") or []))
                 return
-            if parsed.path == "/api/redo":
-                self.send_json(redo_last_action())
+            if parsed.path in ("/api/undo", "/api/redo"):
+                res = (undo_last_action if parsed.path == "/api/undo" else redo_last_action)()
+                # 티켓에서 만든 새 행을 취소/다시실행하면 티켓 카드도 처리할 것 <-> 보관함으로 같이 옮긴다
+                try:
+                    import re as _re
+                    m = _re.match(r"새 행 추가 \(SDSK (\d+)\)", str(res.get("summary") or ""))
+                    if m:
+                        if parsed.path == "/api/undo":
+                            ticket_ops.ticket_reopen(m.group(1))
+                        else:
+                            ticket_ops.ticket_handle(m.group(1), "Memo 반영", "watching")
+                        res["ticket"] = m.group(1)
+                except Exception:
+                    logger.warning("undo/redo 티켓 연동 실패(무시)", exc_info=True)
+                self.send_json(res)
                 return
-            if parsed.path == "/api/undo":
-                self.send_json(undo_last_action())
+            if parsed.path == "/api/tickets/reopen":
+                try:
+                    self.send_json(ticket_ops.ticket_reopen(self.read_json().get("key")))
+                except Exception as e:
+                    self.send_json({"error": str(e)}, 400)
+                return
+            if parsed.path == "/api/tickets/regroup":
+                try:
+                    b = self.read_json()
+                    self.send_json(ticket_ops.ticket_regroup(b.get("key"), b.get("instruction")))
+                except Exception as e:
+                    self.send_json({"error": str(e)}, 400)
                 return
             if parsed.path == "/api/tickets/due":
                 try:
