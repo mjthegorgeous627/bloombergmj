@@ -1,0 +1,528 @@
+*{box-sizing:border-box}
+:root{
+  font-family:-apple-system,"Segoe UI","Malgun Gothic",Arial,sans-serif;
+  color:#1e293b;background:#f1f4f9;
+  --line:#e2e8f0; --line-strong:#cbd5e1;
+}
+body{margin:0}
+
+.sticky-top{position:sticky;top:0;z-index:20;background:#f1f4f9;
+  box-shadow:0 4px 10px rgba(15,23,42,.08)}
+
+.topbar{height:38px;background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;
+  display:flex;align-items:center;justify-content:space-between;padding:0 18px;
+  box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.topbar h1{font-size:14.5px;margin:0;font-weight:600;letter-spacing:.2px}
+.topbar-right{display:flex;align-items:center;gap:12px}
+#clock{font-size:11.5px;color:#cbd5e1;font-variant-numeric:tabular-nums}
+#sapLoopWrap{position:relative}
+#sapLoopStatus{font-size:11.5px;display:flex;align-items:center;gap:5px;cursor:pointer;
+  padding:3px 6px;border-radius:5px;user-select:none}
+#sapLoopStatus:hover{background:rgba(255,255,255,.1)}
+#sapLoopStatus .dot{width:7px;height:7px;border-radius:50%;background:#64748b;display:inline-block}
+#sapLoopStatus.running .dot{background:#22c55e;box-shadow:0 0 4px #22c55e}
+#sapLoopStatus.running{color:#86efac}
+#sapLoopStatus.stopped .dot{background:#f87171}
+#sapLoopStatus.stopped{color:#fca5a5}
+/* 2026-09-13 사용자 요청: 주말/공휴일(자동화가 안 도는 날)을 달력 숫자로
+   빨갛게 보여주고, 그 외 날짜(임시공휴일 등)도 클릭으로 수동 지정 가능하게 -
+   시계 옆 📅 버튼을 눌러서 여는 드롭다운, 위 sapLoopMenu와 같은 패턴. */
+#calWrap{position:relative}
+.cal-toggle-btn{background:none;border:1px solid #475569;border-radius:5px;color:#cbd5e1;
+  font-size:13px;padding:3px 7px;cursor:pointer;line-height:1}
+.cal-toggle-btn:hover{background:#334155}
+#calPanel{display:none;position:absolute;top:100%;right:0;margin-top:4px;
+  background:#1e293b;border:1px solid #334155;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.35);
+  padding:10px;z-index:50;width:220px}
+#calPanel.open{display:block}
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.cal-head button{background:none;border:none;color:#cbd5e1;font-size:13px;cursor:pointer;padding:2px 6px}
+.cal-head button:hover{color:#fff}
+.cal-title{color:#e2e8f0;font-size:12.5px;font-weight:600}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.cal-wd{color:#64748b;font-size:10.5px;padding:2px 0}
+.cal-day{color:#e2e8f0;font-size:11.5px;padding:4px 0;border-radius:5px;cursor:pointer}
+.cal-day:hover{background:#334155}
+.cal-day.nonworking{color:#f87171;font-weight:700}
+.cal-day.today{box-shadow:inset 0 0 0 1px #60a5fa}
+.cal-legend{margin-top:6px;font-size:10px;color:#94a3b8;line-height:1.4}
+
+/* 2026-08-28: 트레이 아이콘 우클릭 메뉴와 같은 기능(시작/중지/강제 재시작)을
+   페이지 안에서도 쓰게 - 시계 옆 상태 점을 눌러서 여는 드롭다운. */
+#sapLoopMenu{display:none;position:absolute;top:100%;right:0;margin-top:4px;
+  background:#1e293b;border:1px solid #334155;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.35);
+  min-width:190px;z-index:50;overflow:hidden}
+#sapLoopMenu.open{display:block}
+#sapLoopMenu button{display:block;width:100%;text-align:left;background:none;border:none;
+  color:#e2e8f0;font-size:12px;padding:9px 12px;cursor:pointer}
+#sapLoopMenu button:hover{background:#334155}
+#sapLoopMenu button.danger{color:#fca5a5}
+#sapLoopMenu hr{border:none;border-top:1px solid #334155;margin:2px 0}
+
+.controls{display:flex;align-items:flex-start;gap:8px;padding:8px 12px 0}
+.ctrl-col{flex:1;background:#fff;border:1px solid var(--line);border-radius:8px;
+  padding:7px 9px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.ctrl-col h3{margin:0 0 5px;font-size:11px;font-weight:700;color:#64748b;
+  text-transform:uppercase;letter-spacing:.5px;cursor:pointer;user-select:none;
+  display:flex;align-items:center;justify-content:space-between}
+.ctrl-col-toggle{font-size:10px;color:#94a3b8}
+.ctrl-col.collapsed .ctrl-col-body{display:none}
+.ctrl-col.collapsed h3{margin-bottom:0}
+.ctrl-divider{height:1px;background:var(--line);margin:5px 0}
+/* 2026-08-25: 세로로 한 줄씩 쌓이던 짧은 버튼들을 같은 줄에 여러 개 묶어서
+   컨트롤 패널 전체 높이를 줄이기 위한 그리드 래퍼 - 컨트롤 패널이 커져서
+   그 아래 오더 목록이 안 보이는 문제(사용자 신고, 2026-08-25) 대응. 긴
+   설명형 버튼(예: "4-2. S/N 오더 반영 시도...")은 여기 넣지 않고 기존처럼
+   한 줄 전체를 씀 - 그리드에 넣으면 줄바꿈이 심해져 오히려 더 높아짐.*/
+.btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:5px}
+.btn-grid.cols4{grid-template-columns:repeat(4,1fr)}
+.btn-grid .btn.block{margin-bottom:0}
+
+.btn{height:26px;border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:0 10px;
+  cursor:pointer;font-size:12px;color:#334155;transition:background .12s,box-shadow .12s,transform .05s}
+.btn:hover{background:#f8fafc;box-shadow:0 1px 2px rgba(15,23,42,.06)}
+.btn:active{transform:translateY(1px)}
+.btn.block{display:block;width:100%;text-align:left;height:auto;padding:5px 9px;
+  margin-bottom:4px;line-height:1.25;font-weight:500}
+.btn.primary{background:#2563eb;color:#fff;border-color:#2563eb}
+.btn.primary:hover{background:#1d4ed8}
+.btn.warn{background:#dc2626;border-color:#dc2626;color:#fff;font-weight:700}
+.btn.warn:hover{background:#b91c1c}
+.btn.finish{background:#0f172a;color:#fff;border-color:#0f172a}
+.btn.finish:hover{background:#1e293b}
+.btn.muted{background:#6b7280;color:#fff;border-color:#6b7280}
+.btn.muted:hover{background:#4b5563}
+.btn.billed{background:#16a34a;color:#fff;border-color:#16a34a}
+.btn.billed:hover{background:#15803d}
+.btn.billed.tiny{padding:2px 6px;font-size:10.5px;width:auto;display:inline-block;margin:3px 0 0 0}
+.item-row.row-billed td{background:#bbf7d0}
+.item-row.row-billed:hover td{background:#86efac}
+.btn .hint{font-size:10.5px;font-weight:400;opacity:.8;display:block;margin-top:1px}
+.merge-field-row{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:11.5px;color:#475569;
+  margin:2px 0 7px;padding:6px 8px;background:#f8fafc;border:1px solid var(--line);border-radius:7px}
+.merge-field-row label{display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap}
+.merge-field-row input{cursor:pointer}
+.ctrl-inline{display:flex;gap:6px;margin-bottom:7px}
+.ctrl-inline .btn{flex:1.3;text-align:left}
+.ctrl-inline input{flex:1;border:1px solid var(--line-strong);border-radius:7px;padding:0 9px;
+  font-size:12.5px;color:#1e293b}
+.ctrl-inline input:focus{outline:2px solid #93c5fd;outline-offset:-1px}
+
+.board-wrap{margin:16px;background:#fff;border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 1px 2px rgba(15,23,42,.04)}
+table.board-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}
+.board-table thead th{position:sticky;top:var(--sticky-top-h,0px);z-index:5;background:#e8720c;color:#fff;
+  text-align:center;padding:9px 10px;font-weight:600;letter-spacing:.2px;
+  box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.board-table thead th:first-child{border-top-left-radius:0}
+
+/* 2026-08-27 user request: 날짜 배너 줄(예: "2026. 08. 26 수요일")이 너무 높아서
+   화면에 보이는 오더 행 수가 줄어듦 - padding/font-size를 줄여 한 줄당 높이를
+   압축(약 40px→28px), 그만큼 아래 오더 목록이 더 많이 보이도록. */
+.date-banner-row td{background:linear-gradient(90deg,#1e3a5f,#25507e);color:#fff;
+  font-weight:600;font-size:12.5px;padding:5px 12px;letter-spacing:.2px}
+.date-banner-inner{display:flex;align-items:center;justify-content:space-between}
+.date-banner-right{display:flex;align-items:center;gap:10px}
+.date-export-check{width:14px;height:14px;cursor:pointer}
+.date-toggle{background:transparent;border:none;color:#fff;font-size:12px;cursor:pointer;
+  padding:1px 8px;border-radius:5px;line-height:1.3}
+.date-toggle:hover{background:rgba(255,255,255,.18)}
+tbody.date-group.collapsed .item-row,tbody.date-group.collapsed .empty-row{display:none}
+
+/* 2026-08-27 user request: 오더 라인 간격/글자 조금 줄이기 (너무 많이는 말고) -
+   board-table font-size 12.5→12px과 함께, 줄 하나당 약 3-4px 정도만 압축. */
+.item-row td{padding:5px 10px;border-bottom:1px solid var(--line);vertical-align:middle;
+  background:#fff;transition:background .12s}
+.item-row:hover td{background:#f8fafc}
+.item-row[draggable="true"]{cursor:grab}
+.item-row.dragging{opacity:.35}
+.item-row.drop-before td{box-shadow:inset 0 2px 0 0 #2563eb}
+.item-row.drop-after td{box-shadow:inset 0 -2px 0 0 #2563eb}
+.item-row.row-done td{background:#bfdbfe}
+.item-row.row-done:hover td{background:#93c5fd}
+.item-row.row-pending td{background:#fecaca}
+.item-row.row-pending:hover td{background:#fca5a5}
+.item-row.row-cancelled td{background:#d1d5db;color:#6b7280;text-decoration:line-through}
+.item-row.row-cancelled:hover td{background:#b0b6c0}
+/* Portal(Serial/QR) 또는 POD 자동화 실패 표시 (todo b, 2026-08-18) - done(파랑)/
+   pending(빨강)과 안 겹치는 주황 계열, 다음 재실행이 성공하면 서버가
+   portal_error/pod_error를 비워서 자동으로 사라짐. row-pending 등과 동시에
+   붙어도(둘 다 해당하는 행) CSS 선언 순서상 이게 이겨서 실패가 우선 보임. */
+.item-row.row-error td{background:#fed7aa;box-shadow:inset 4px 0 0 0 #ea580c}
+.item-row.row-error:hover td{background:#fdba74}
+.order-error-badge{cursor:pointer;margin-left:4px;color:#ea580c;font-weight:700}
+
+.type-cell{text-align:center}
+.type-select{font-weight:700;border:1px solid transparent;background:transparent;
+  border-radius:5px;padding:2px 4px;cursor:pointer;font-size:12px}
+.type-select:hover{border-color:var(--line-strong)}
+.type-delivery{color:#2563eb}
+.type-pickup{color:#dc2626}
+.type-other{color:#9333ea}
+.ord-cell{font-weight:600}
+.ord-cell .muted{display:block;font-weight:400;color:#94a3b8;font-size:11px;margin-top:3px;white-space:pre-wrap}
+.order-select-all{float:right;width:14px;height:14px;cursor:pointer;margin-left:6px}
+.cust-cell{color:#334155;white-space:pre-wrap}
+.addr-cell::first-line{font-weight:700;color:#1e293b}
+.check-cell{text-align:center}
+.check-cell input{width:15px;height:15px;cursor:pointer}
+.handle-cell{text-align:center;cursor:grab}
+.drag-handle{display:inline-block;color:#cbd5e1;font-size:15px;cursor:grab;user-select:none}
+.drag-handle:hover{color:#94a3b8}
+
+[contenteditable="true"]{outline:none;border-radius:5px;padding:2px 4px;margin:-2px -4px;
+  cursor:text;min-height:1.2em}
+[contenteditable="true"]:hover{background:#f8fafc}
+[contenteditable="true"]:focus{background:#eff6ff;box-shadow:0 0 0 2px #93c5fd}
+
+.board-table thead th:nth-child(1){width:3%}
+.board-table thead th:nth-child(2){width:5%}
+.board-table thead th:nth-child(3){width:4%}
+.board-table thead th:nth-child(4){width:9%}
+.board-table thead th:nth-child(5){width:15%}
+.board-table thead th:nth-child(6){width:6%}
+.board-table thead th:nth-child(7){width:7%}
+.board-table thead th:nth-child(8){width:7%}
+.board-table thead th:nth-child(9){width:6%}
+.board-table thead th:nth-child(10){width:16%}
+.board-table thead th:nth-child(11){width:8%}
+/* Column width/alignment on body rows is keyed by explicit class, NOT
+   nth-child - a merged group's non-first rows omit the rowspan'd Order#/
+   Customer/Phone/Address/Memo <td>s entirely (they're covered by the first
+   row's rowspan), which shifts every later cell's nth-child index left of
+   its true column. nth-child rules here silently applied the WRONG
+   column's width/alignment to Item/M-N/S-N/check on every row after a
+   group's first - this is what caused the "first row looks right, every
+   row after it looks off" misalignment. Classes don't shift with cell
+   count, so this class is what's now considered authoritative. */
+.item-row td.handle-cell{width:3%}
+.item-row td.type-cell{width:5%}
+.item-row td.ord-cell{width:9%}
+.item-row td.item-cell{width:15%;white-space:pre-wrap}
+.item-row td.mn-cell{width:6%;text-align:center;white-space:pre-wrap}
+.item-row td.sn-cell{width:7%;text-align:center;white-space:pre-wrap}
+.item-row td.customer-cell{width:7%;text-align:center}
+.item-row td.phone-cell{width:6%;text-align:center}
+.item-row td.addr-cell{width:16%;text-align:center}
+.item-row td.memo-cell{width:8%;text-align:center}
+.item-row td.check-cell{width:4%}
+
+.empty-row td{padding:22px 10px;text-align:center;color:#94a3b8;font-size:12.5px}
+.date-group.drag-over .date-banner-row td{background:linear-gradient(90deg,#2563eb,#3b82f6)}
+
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:#0f172a;color:#fff;padding:10px 18px;border-radius:8px;opacity:0;
+  transition:.25s;font-size:13px;z-index:50;max-width:80vw;text-align:center;
+  box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.trash-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100;
+  align-items:flex-start;justify-content:center;padding:40px 20px}
+.trash-overlay.show{display:flex}
+.trash-panel{background:#fff;border-radius:10px;max-width:1000px;width:100%;max-height:85vh;
+  overflow-y:auto;padding:16px 20px;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+.trash-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.trash-header h3{font-size:15px}
+.trash-list{margin-top:10px}
+.trash-table{width:100%;border-collapse:collapse;font-size:12px}
+.trash-table th{text-align:left;padding:6px 8px;border-bottom:2px solid var(--line-strong);
+  color:#64748b;font-weight:600}
+.trash-table td{padding:6px 8px;border-bottom:1px solid var(--line)}
+.trash-empty{padding:20px;text-align:center;color:#94a3b8;font-size:12.5px}
+
+/* 배송장 인쇄: hidden on screen, only shown (and only content left visible)
+   inside @media print. Built fresh from scratch, plain black-on-white table -
+   deliberately NOT reusing .board-table's classes/colors, so the printed
+   slip stays forced-B&W regardless of the board's on-screen styling or the
+   browser's own "background graphics" print setting. */
+#printArea{display:none}
+.print-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9.5px;color:#000;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}
+.print-table th,.print-table td{border:1px solid #000;padding:3px 4px;text-align:left;
+  vertical-align:top;white-space:pre-wrap;word-break:break-word;background:#fff;color:#000}
+.print-table th{font-weight:700;text-align:center}
+.print-table td:nth-child(4),.print-table td:nth-child(5){text-align:center}
+.print-table tr{break-inside:avoid}
+/* 배송 강조: 흑백 인쇄에서도 배경 음영은 회색 톤으로 남는다(위 print-color-adjust:exact
+   가 브라우저의 "배경 그래픽" 인쇄 옵션 체크 여부와 무관하게 강제 출력되게 함).
+   혹시 그마저 안 찍히는 환경 대비로 테두리 두께도 같이 바꿔 이중 안전장치를 둠 -
+   회수는 기존 그대로(흰 배경/얇은 테두리), 배송만 음영+굵은 테두리로 대비. */
+.print-table td.print-type-delivery{background:#c2c2c2;font-weight:700;border-width:2px}
+#printArea h2{font-size:15px;margin:0 0 6px;color:#000}
+#printArea h3{font-size:12px;margin:14px 0 4px;color:#000}
+#printArea h3:first-of-type{margin-top:0}
+@media print{
+  @page{size:A4 landscape;margin:10mm}
+  body>*:not(#printArea){display:none!important}
+  #printArea{display:block!important}
+}
+
+.hl-menu{position:fixed;z-index:200;background:#fff;border:1px solid var(--line-strong);
+  border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);padding:4px;
+  display:flex;flex-direction:column;min-width:130px}
+.hl-menu-btn{display:block;width:100%;text-align:left;border:none;background:none;
+  padding:6px 10px;font-size:12px;border-radius:5px;cursor:pointer;color:#334155}
+.hl-menu-btn:hover{background:#f1f5f9}
+.hl-menu-btn.hl-swatch-yellow{background:#fde047}
+.hl-menu-btn.hl-swatch-yellow:hover{background:#facc15}
+.hl-menu-btn.hl-swatch-pink{background:#f9a8d4}
+.hl-menu-btn.hl-swatch-pink:hover{background:#f472b6}
+.hl-menu-btn.hl-swatch-red{color:#dc2626;font-weight:700}
+/* ===== 2026-10-13 추가: 오른쪽 달력/메모 열, 메모 라벨, 모아보기 필터, 오더 아이콘 ===== */
+.side-col{position:fixed;right:0;top:38px;bottom:0;width:300px;background:#fff;
+  border-left:1px solid var(--line);z-index:25;display:flex;flex-direction:column;font-size:12px;
+  box-shadow:-2px 0 8px rgba(15,23,42,.05)}
+.side-col.closed{width:40px}
+.side-head{display:flex;align-items:center;justify-content:space-between;padding:6px 8px 6px 12px;
+  border-bottom:1px solid var(--line);font-weight:700;color:#334155;background:#f8fafc}
+.side-col.closed .side-head{justify-content:center;padding:6px 0}
+.side-col.closed .side-head b,.side-col.closed .side-body{display:none}
+.side-toggle{border:1px solid var(--line-strong);background:#fff;border-radius:5px;width:24px;height:24px;cursor:pointer;color:#64748b;line-height:1}
+.side-toggle:hover{color:#2563eb;border-color:#2563eb}
+.side-rail{display:none;flex-direction:column;align-items:center;gap:8px;padding:8px 0}
+.side-col.closed .side-rail{display:flex}
+.side-rail button{width:32px;border:1px solid var(--line-strong);background:#f8fafc;border-radius:6px;padding:4px 0;font-size:11px;cursor:pointer;color:#334155}
+.side-rail button:hover{border-color:#2563eb;color:#2563eb}
+.side-body{overflow:auto;flex:1;display:flex;flex-direction:column;min-height:0}
+.side-sec{padding:8px 10px;border-bottom:1px solid var(--line)}
+.side-sec h4{margin:0 0 6px;font-size:11px;letter-spacing:.05em;color:#64748b;display:flex;justify-content:space-between}
+.side-sec h4 i{font-style:normal;font-family:Consolas,monospace;color:#2563eb}
+body.side-open .flag-filter-bar{margin-right:300px}
+body.side-open .board-wrap{margin-right:316px}
+body.side-closed .flag-filter-bar{margin-right:40px}
+body.side-closed .board-wrap{margin-right:56px}
+
+/* 달력 */
+.sc-sum{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+.sc-sum span{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:99px;background:#f1f5f9;color:#475569}
+.sc-sum span.sc-acc{background:#dbeafe;color:#1d4ed8}
+.sc-nav{display:flex;align-items:center;justify-content:space-between;font-weight:700;margin-bottom:3px}
+.sc-nav button{border:0;background:none;font-size:15px;color:#94a3b8;cursor:pointer;padding:0 8px}
+.sc-nav button:hover{color:#2563eb}
+.sc-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.sc-wd{text-align:center;font-size:10px;color:#94a3b8}
+.sc-day{border:1px solid transparent;background:#f1f5f9;border-radius:5px;height:32px;padding:2px 3px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;font:inherit;text-align:left}
+.sc-day:hover{border-color:#2563eb}
+.sc-day .n{font-family:Consolas,monospace;font-size:10px;line-height:1}
+.sc-day.non{background:#fee2e2}
+.sc-day.non .n{color:#dc2626;font-weight:700}
+.sc-hols{display:flex;flex-direction:column;gap:1px;margin-top:5px;font-size:11px}
+.sc-hol b{color:#dc2626;font-family:Consolas,monospace}
+.sc-hol-none,.sc-leg{color:#94a3b8;font-size:10.5px}
+.sc-leg{margin-top:4px;font-size:10px;text-align:right}
+.sc-day.today{background:#dbeafe}
+.sc-day.non.today{background:#fecaca}
+.sc-day.today .n{color:#1d4ed8;font-weight:700}
+.sc-day .c{align-self:flex-end;font-family:Consolas,monospace;font-size:10px;font-weight:700;line-height:1;padding:1px 5px;border-radius:99px;background:#94a3b8;color:#fff}
+.sc-day.left .c{background:#2563eb}
+.sc-day.pend .c{background:#dc2626}
+.sc-day.done .c{background:#bfdbfe;color:#1d4ed8}
+tbody.date-group.jump-flash .date-banner-row td{box-shadow:inset 0 0 0 2px #facc15}
+.date-banner-row{scroll-margin-top:calc(var(--sticky-top-h,38px) + 36px)}
+
+/* 빠른 메모 */
+.sm-new{width:100%;resize:none;min-height:46px;border:1.5px solid #2563eb;border-radius:7px;padding:5px 8px;font:inherit}
+.sm-q{width:100%;margin-top:6px;border:1px solid var(--line-strong);background:#f8fafc;border-radius:6px;padding:3px 8px;font:inherit}
+.sm-grp{font-size:10px;font-weight:700;letter-spacing:.05em;color:#94a3b8;margin-top:6px}
+.sm-item{display:grid;grid-template-columns:auto 1fr auto;gap:2px 7px;align-items:start;padding:4px 7px;border:1px solid var(--line);border-radius:7px;background:#f8fafc;margin-top:4px}
+.sm-item.pin{background:#fef9c3;border-color:#fde047}
+.sm-item.dn .sm-tx{text-decoration:line-through;color:#94a3b8}
+.sm-item input{margin:3px 0 0}
+.sm-tx{outline:none;white-space:pre-wrap;word-break:break-word;border-radius:3px;padding:0 2px}
+.sm-tx:focus{background:#fff;box-shadow:0 0 0 1.5px #2563eb}
+.sm-act{display:flex;gap:1px}
+.sm-act button{border:0;background:none;color:#94a3b8;cursor:pointer;padding:0 3px;font-size:13px}
+.sm-act button:hover{color:#2563eb}
+.sm-tm{grid-column:2/4;font-size:9.5px;color:#94a3b8;font-family:Consolas,monospace}
+mark{background:#fde047;border-radius:2px}
+
+/* 메모 칸 라벨 + 모아보기 */
+.memo-flags{display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-bottom:3px}
+.flag-label{font-size:10.5px;font-weight:700;padding:0 7px;border-radius:4px;line-height:1.5}
+.flag-delayed{background:#fecaca;color:#b91c1c}
+.flag-check{background:#fed7aa;color:#c2410c}
+.flag-btn{position:absolute;right:2px;top:1px;border:0;background:none;color:#94a3b8;cursor:pointer;font-size:12px;opacity:0;padding:0 2px;line-height:1}
+td.memo-cell:hover .flag-btn{opacity:.8}
+.flag-btn:hover{color:#2563eb;opacity:1}
+.hl-menu-btn.flag-delayed-btn{color:#b91c1c;font-weight:700}
+.hl-menu-btn.flag-check-btn{color:#c2410c;font-weight:700}
+.flag-filter-bar{margin:0;padding:6px 16px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:#f1f4f9;border-bottom:1px solid var(--line)}
+.ff-chips{display:inline-flex;align-items:center;gap:6px}
+.ff-sep{width:1px;height:20px;background:var(--line-strong);margin:0 4px}
+.ff-act{display:inline-flex;gap:5px;align-items:center}
+.ff-act .btn.block,.ff-act .btn.billed.tiny{display:inline-block;width:auto;height:24px;padding:0 11px;margin:0;text-align:center;font-size:12px}
+.ff-spacer{flex:1}
+.ff-ico{border:1px solid var(--line-strong);background:#fff;border-radius:6px;width:26px;height:24px;cursor:pointer;color:#475569;font-size:13px;line-height:1;padding:0}
+.ff-ico:hover{border-color:#2563eb;color:#2563eb}
+.ff-title{font-size:11px;font-weight:700;color:#64748b;margin-right:2px}
+.ff-chip{border:1px solid var(--line-strong);background:#fff;border-radius:99px;padding:2px 11px;font:inherit;font-size:11.5px;font-weight:600;color:#475569;cursor:pointer}
+.ff-chip i{font-style:normal;font-family:Consolas,monospace;margin-left:5px;opacity:.75}
+.ff-chip.on{background:#1e293b;border-color:#1e293b;color:#fff}
+.ff-chip.flag-delayed:not(.on){background:#fff5f5;color:#b91c1c;border-color:#fecaca}
+.ff-chip.flag-check:not(.on){background:#fff7ed;color:#c2410c;border-color:#fed7aa}
+.ff-chip.flag-delayed.on{background:#b91c1c;border-color:#b91c1c}
+.ff-chip.flag-check.on{background:#c2410c;border-color:#c2410c}
+
+/* 오더번호 / 코드 아이콘 */
+.ord-line{display:flex;align-items:flex-start;gap:3px}
+.ord-line>div{flex:1;min-width:0}
+.ord-icons{display:inline-flex;justify-content:flex-end;gap:0;flex:0 0 28px;width:28px;margin-top:1px}
+.ord-slot{display:inline-block;width:14px;flex:0 0 14px}
+.code-icon-row{justify-content:flex-end;width:28px}
+.ord-ico{width:14px;text-align:center;border:0;background:none;color:#cbd5e1;cursor:pointer;font-size:11px;line-height:1.3;padding:0;border-radius:3px}
+.ord-ico:hover{color:#2563eb;background:#eff6ff}
+.ord-cell:hover .ord-ico{color:#64748b}
+.ord-cell:hover .ord-ico:hover{color:#2563eb}
+.code-wrap{display:flex;align-items:flex-start;gap:3px}
+.code-wrap>.muted{flex:1;min-width:0;line-height:15px}
+.code-icons{flex:0 0 28px;width:28px;margin-top:3px}
+.code-icon-row{height:15px;display:flex;align-items:center}
+.code-icon-row .ord-ico{line-height:15px;padding:0 2px}
+
+/* 오른쪽 열 도구 */
+.side-sec.tools h4{margin-bottom:5px}
+.srow{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;margin-bottom:4px}
+.srow.wrap{display:flex;flex-wrap:wrap}
+.srow.wrap .btn{flex:1 1 auto}
+.side-col .srow .btn.block{width:auto;text-align:center;padding:5px 4px;font-size:11px;line-height:1.25;margin:0}
+.side-det{margin-top:2px}
+.side-det summary{cursor:pointer;font-size:11px;color:#64748b;padding:3px 0;list-style:none}
+.side-det summary::before{content:"▸ "}
+.side-det[open] summary::before{content:"▾ "}
+.side-det .ctrl-inline{margin:4px 0}
+#sideMemoList{max-height:170px;overflow:auto}
+
+/* 줄 아래 ＋ */
+tr.add-row-tr td{padding:0!important;height:6px;border:0!important;background:transparent!important;position:relative}
+.add-row-btn{position:absolute;left:50%;top:-8px;transform:translateX(-50%);width:44px;height:16px;line-height:14px;border:1px solid #2563eb;background:#fff;color:#2563eb;border-radius:8px;font-size:12px;cursor:pointer;opacity:0;padding:0;z-index:3}
+tr.add-row-tr:hover .add-row-btn,tr.item-row:last-of-type+tr.add-row-tr .add-row-btn:focus,.add-row-btn:hover{opacity:1}
+tr.add-row-tr:hover td{background:#eff6ff!important}
+.row-menu{min-width:150px}
+.row-menu-head{font-size:10.5px;color:#64748b;padding:3px 10px;font-weight:700}
+.row-menu-sep{height:1px;background:var(--line);margin:3px 0}
+.row-menu .merge-field-row{display:flex;flex-wrap:wrap;gap:2px 8px;padding:3px 10px;font-size:11px}
+.hl-menu-btn.row-menu-del{color:#dc2626}
+
+/* 메모 칸 가로 확대 (item/address를 조금 줄여서 확보) */
+.board-table thead th:nth-child(4){width:12%}
+.board-table thead th:nth-child(5){width:12%}
+.board-table thead th:nth-child(10){width:14%}
+.board-table thead th:nth-child(11){width:14%}
+.item-row td.item-cell{width:13%}
+.item-row td.addr-cell{width:14%}
+.item-row td.memo-cell{width:14%}
+
+/* 이력 검색 / 고정 메모 */
+.ff-hist input{width:200px;height:24px;border:1px solid var(--line-strong);border-radius:6px;padding:0 9px;font:inherit;font-size:12px;background:#fff}
+.ff-hist input:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 2px #dbeafe}
+.hist-pop{position:fixed;z-index:120;display:none;flex-direction:column;background:#fff;border:1px solid var(--line-strong);border-radius:10px;box-shadow:0 12px 32px rgba(15,23,42,.22);max-height:70vh;overflow:hidden}
+.hist-head{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--line);font-size:12px;background:#f8fafc}
+.hist-head span{color:#94a3b8}
+.hist-head a{margin-left:auto;color:#2563eb;text-decoration:none}
+.hist-x{border:0;background:none;font-size:16px;color:#94a3b8;cursor:pointer;line-height:1}
+.hist-scroll{overflow:auto}
+.hist-empty{padding:18px;color:#94a3b8;text-align:center}
+.hist-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.hist-tbl th{position:sticky;top:0;background:#e2e8f0;text-align:left;padding:4px 8px;font-weight:700;color:#475569}
+.hist-tbl td{padding:4px 8px;border-top:1px solid var(--line);white-space:pre-line;vertical-align:top}
+.hist-row{cursor:pointer}
+.hist-row:hover td,.hist-row.sel td{background:#eff6ff}
+.k-회수{color:#dc2626;font-weight:700}.k-배송{color:#2563eb;font-weight:700}
+.hist-detail td{background:#f8fafc!important;padding:8px 12px}
+.hd-src{font-size:10.5px;color:#94a3b8;margin-bottom:5px}
+.hd-row{border:1px solid var(--line);border-radius:7px;background:#fff;padding:5px 9px;margin-bottom:5px;display:flex;flex-wrap:wrap;gap:3px 16px}
+.hd-cap{flex:0 0 100%;font-size:10.5px;font-weight:700;color:#64748b}
+.hd-f{display:flex;gap:6px;font-size:11.5px}.hd-f b{color:#94a3b8;font-weight:600}.hd-f span{white-space:pre-line}
+.side-sec h4 .pin-open{border:1px solid var(--line-strong);background:#fff;border-radius:5px;cursor:pointer;font-size:12px;padding:0 6px;line-height:18px}
+.side-sec h4 .pin-open:hover{border-color:#2563eb}
+.pin-panel{position:fixed;z-index:110;right:316px;top:86px;width:520px;height:440px;display:none;flex-direction:column;background:#fff;border:1px solid var(--line-strong);border-radius:10px;box-shadow:0 12px 32px rgba(15,23,42,.22);overflow:hidden}
+body.side-closed .pin-panel{right:56px}
+.pin-head{display:flex;align-items:center;gap:8px;padding:7px 12px;background:#f8fafc;border-bottom:1px solid var(--line);font-size:12px}
+.pin-head a{margin-left:auto;color:#2563eb;text-decoration:none}
+.pin-close{border:0;background:none;font-size:17px;color:#94a3b8;cursor:pointer;line-height:1}
+.pin-tabs{display:flex;gap:2px;flex-wrap:wrap;background:#e2e8f0;padding:5px 6px 0}
+.pin-tab{display:flex;align-items:center;gap:6px;background:#dde3ec;color:#475569;border-radius:6px 6px 0 0;padding:4px 9px;font-size:12px;cursor:pointer;max-width:150px}
+.pin-tab.on{background:#fff;color:#0f172a}
+.pt-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;outline:none}
+.pt-x{color:#94a3b8;font-size:12px;padding:0 3px;border-radius:3px}
+.pt-x:hover,.pin-tab.arm .pt-x{background:#fee2e2;color:#dc2626}
+.pin-add{border:0;background:none;color:#64748b;font-size:16px;cursor:pointer;padding:0 8px}
+#pinEditor{flex:1;border:0;resize:none;padding:10px 12px;font:12.5px/1.55 "Malgun Gothic",sans-serif;outline:none}
+
+/* 2026-10-14: 모아보기 줄 + 주황 헤더를 함께 고정(스크롤해도 따라옴), 둘 사이 간격 축소 */
+.flag-filter-bar{position:sticky;top:var(--sticky-top-h,38px);z-index:19;padding:3px 16px;box-shadow:0 1px 0 var(--line)}
+.board-wrap{margin-top:3px}
+.board-table thead th{top:calc(var(--sticky-top-h,38px) + var(--ff-h,34px));padding-top:6px;padding-bottom:6px}
+.date-banner-row{scroll-margin-top:calc(var(--sticky-top-h,38px) + var(--ff-h,34px) + 30px)}
+
+/* 2026-10-14: 오더번호 아래 줄(OBD/SDSK/ORD)을 맨 윗 오더와 같은 진한 색으로(굵기는 보통) */
+.ord-cell .muted{color:inherit;font-weight:400}
+
+.ff-ico.ff-quick{width:auto;padding:0 9px;font-size:11.5px;font-weight:700;color:#1d4ed8}
+
+/* 서명 용지 pod/poc */
+.ff-forms{display:inline-flex;align-items:center;gap:8px;margin-left:6px}
+.ff-chk{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;color:#334155;cursor:pointer;user-select:none}
+.ff-chk input{margin:0}
+.btn.ff-formbtn{display:inline-block;width:auto;height:24px;padding:0 12px;margin:0;font-size:12px}
+
+/* 마감 완료된 날짜(보드엔 남은 행 없음): 숫자만 연한 회색 알약 */
+.sc-day.fin .c{background:#e2e8f0;color:#475569}
+
+/* 마감된 과거 날짜 이력 팝업 (2026-10-15) */
+.dayh-back{position:fixed;inset:0;z-index:130;background:rgba(15,23,42,.35);display:none;align-items:flex-start;justify-content:center;padding:5vh 16px}
+.dayh-box{background:#fff;border-radius:10px;box-shadow:0 14px 40px rgba(15,23,42,.3);width:min(1100px,100%);max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
+.dayh-head{display:flex;align-items:center;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:13px}
+.dayh-head span{color:#94a3b8;font-size:11.5px}.dayh-head i{font-style:normal;font-size:11.5px;color:#475569;margin-left:auto}
+.dayh-x{border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:#64748b}
+.dayh-scroll{overflow:auto;padding:8px 14px 14px}
+.dayh-src{font-size:10.5px;color:#94a3b8;margin:8px 0 4px}
+.dayh-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.dayh-tbl th{position:sticky;top:0;background:#e2e8f0;text-align:left;padding:4px 7px;color:#475569}
+.dayh-tbl td{border-top:1px solid var(--line);padding:4px 7px;vertical-align:top;white-space:pre-line;min-width:48px}
+.dayh-tbl tr.dayh-brk td{border-top:2px solid #cbd5e1}
+.dayh-c:focus{outline:2px solid #2563eb;background:#eff6ff}
+.dayh-c.dayh-saving{background:#fef9c3}.dayh-c.dayh-ok{background:#dcfce7}.dayh-c.dayh-err{background:#fecaca}
+
+.dayh-wrap{overflow-x:auto}
+.dayh-tbl td.dayh-k{font-weight:700;white-space:nowrap;width:1%}
+.dayh-c:focus{background:#eff6ff !important}
+.dayh-misc{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px}
+.dayh-misc button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 9px;cursor:pointer;font-size:12px}
+.dayh-misc button span{color:#94a3b8;font-size:10.5px}.dayh-misc button:hover{background:#f1f5f9}
+
+/* 퀵 기사님 안내문 */
+.quick-modal{background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,.3);width:min(1000px,94vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
+.quick-head{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);background:#f8fafc}
+.quick-head span{color:#94a3b8;font-size:12px}
+.quick-x{margin-left:auto;border:0;background:none;font-size:20px;color:#94a3b8;cursor:pointer;line-height:1}
+.quick-body{display:flex;gap:18px;padding:16px;overflow:auto}
+.quick-form{flex:0 0 380px;display:flex;flex-direction:column;gap:10px}
+.quick-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:#334155}
+.quick-form label i{font-weight:400;color:#94a3b8;font-style:normal}
+.quick-form input,.quick-form textarea{border:1px solid var(--line-strong);border-radius:7px;padding:7px 9px;font:inherit;font-size:13px;font-weight:400;resize:vertical}
+.quick-form input:focus,.quick-form textarea:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 2px #dbeafe}
+.quick-two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.quick-sugg{display:flex;flex-direction:column;gap:4px;margin-top:-4px}
+.quick-chip{text-align:left;border:1px dashed var(--line-strong);background:#f8fafc;border-radius:6px;padding:4px 8px;font:inherit;font-size:11.5px;color:#475569;cursor:pointer}
+.quick-chip:hover{border-color:#2563eb;color:#1d4ed8;background:#eff6ff}
+.quick-actions{display:flex;gap:8px;margin-top:4px}
+.quick-actions .btn{width:auto;padding:0 22px;height:34px}
+.quick-prev{flex:1;min-width:0;display:flex;justify-content:center;align-items:flex-start;background:#e2e8f0;border-radius:10px;padding:14px;overflow:hidden}
+.quick-paper{width:210mm;height:297mm;background:#fff;box-shadow:0 2px 10px rgba(15,23,42,.18);zoom:.46;position:relative;flex:0 0 auto}
+.qs-sheet{position:relative;width:210mm;height:297mm;box-sizing:border-box;padding:15mm 20mm 0;text-align:center;color:#111;font-family:"Malgun Gothic","맑은 고딕","Noto Sans KR",sans-serif;background:#fff}
+.qs-title{font-size:30pt;font-weight:800;line-height:1.25;white-space:pre-wrap;padding-bottom:12pt;border-bottom:3pt solid #111}
+.qs-company{margin-top:26pt;font-size:20pt;font-weight:700;line-height:1.3;white-space:pre-wrap}
+.qs-addr{margin-top:4pt;font-size:18pt;line-height:1.4;white-space:pre-wrap}
+.qs-name{margin-top:22pt;font-size:22pt;font-weight:700}
+.qs-phone{margin-top:2pt;font-size:22pt;font-weight:700}
+.qs-tel{font-family:"Segoe UI Symbol",sans-serif;font-weight:400;color:#6b7280;font-size:18pt}
+.qs-note{margin:30pt auto 0;max-width:150mm;border:1pt solid #6b7280;padding:10pt 14pt;font-size:20pt;font-weight:700;line-height:1.4;white-space:pre-wrap}
+.qs-logo{display:block;width:52mm;margin:0 auto 8mm}
+@media print{
+  #printArea .qs-sheet{margin:0;page-break-after:avoid}
+}
+
+.quick-ref{border:1px solid #bfdbfe;background:#eff6ff;border-radius:8px;padding:7px 10px}
+.quick-ref b{display:block;font-size:11px;color:#1d4ed8;margin-bottom:3px}
+.quick-ref pre{margin:0;font:12px/1.45 Consolas,"Malgun Gothic",monospace;color:#1e293b;white-space:pre-wrap;word-break:break-word;user-select:text}

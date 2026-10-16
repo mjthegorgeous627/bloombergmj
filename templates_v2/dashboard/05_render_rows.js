@@ -490,6 +490,17 @@ function renderAll(){
       if(COLLAPSED_DATES.has(iso)) COLLAPSED_DATES.delete(iso); else COLLAPSED_DATES.add(iso);
       renderAll();
     });
+    const selAllBtn=document.createElement('button');
+    selAllBtn.type='button';
+    selAllBtn.className='date-selall';
+    selAllBtn.textContent='전체선택';
+    selAllBtn.title='이 날짜의 모든 행(상태 무관)을 체크/해제합니다 - 배송장 인쇄용. 체크 후 빼고 싶은 행만 개별로 해제하면 그 행만 빼고 인쇄됩니다. (마감용 날짜 체크박스와는 별개)';
+    selAllBtn.addEventListener('click', ()=>{
+      EXPORT_DATES.delete(iso); exportCb.checked=false;   // 날짜 체크박스(마감용 '날짜 전체' 모드)는 끄고, 개별 행 체크만으로 인쇄되게 한다
+      const on=selectAllRowsOfDate(iso);
+      toast(on ? labelFor(iso)+' 전체 행 선택됨 - 빼고 싶은 행만 체크 해제 후 배송장 인쇄' : labelFor(iso)+' 선택 해제됨');
+    });
+    rightGroup.appendChild(selAllBtn);
     rightGroup.appendChild(exportCb);
     rightGroup.appendChild(toggleBtn);
 

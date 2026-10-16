@@ -93,6 +93,32 @@ def render_dashboard_v2_page():
     )
 
 
+def open_mobile_window_proc():
+    """v2 상단 [📱 모바일] 버튼 - 폰 크기 /m 창을 오른쪽 모니터에 띄운다(mobile_window.py, 이미 있으면 위치만 복원)."""
+    import subprocess, sys
+    from pathlib import Path
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    exe = str(pythonw) if pythonw.exists() else sys.executable
+    subprocess.Popen([exe, str(Path(__file__).resolve().parent / "mobile_window.py")],
+                     cwd=str(Path(__file__).resolve().parent), creationflags=subprocess.CREATE_NO_WINDOW)
+    return {"started": True}
+
+
+def render_mobile_m_page():
+    """/m (2026-10-16): PC v2 화면을 그대로 싣고(같은 JS 함수/같은 DB) 그 위에 폰용 카드 화면만 얹는다.
+    PC의 표/사이드바는 CSS로 숨길 뿐 DOM에 그대로 있어서, 모바일 버튼이 PC 버튼과 같은 함수를 부른다.
+    templates_v2/mobile/ 파일은 요청마다 새로 읽는다(재시작 없이 수정 반영)."""
+    page = render_dashboard_v2_page()
+    page = page.replace("<title>Bloomberg Dashboard Seoul</title>", "<title>Bloomberg Mobile</title>", 1)   # mobile_window.py가 이 제목으로 창을 찾는다
+    mdir = TEMPLATES_V2_DIR / "mobile"
+    css = (mdir / "m.css").read_text(encoding="utf-8")
+    html = (mdir / "m.html").read_text(encoding="utf-8")
+    js = (mdir / "m.js").read_text(encoding="utf-8")
+    page = page.replace("</head>", "<style>" + css + "</style></head>", 1)
+    page = page.replace("<body>", '<body class="m-mode">', 1)
+    return page.replace("</body>", html + "<script>" + js + "</script></body>", 1)
+
+
 PAGE_TEMPLATE = dashboard_assets.assemble("dashboard.html", TEMPLATES_DIR)  # CSS/JS 조각을 끼워 넣은 완성본 (dashboard_assets.py 참고)
 
 
@@ -118,13 +144,59 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
+    # 2026-10-16 보안: 이 서버는 로그인이 없고 127.0.0.1에만 열려 있다. 그래도 사용자가 다른
+    # 웹사이트를 열어두면 그 페이지의 스크립트가 http://127.0.0.1:8765 로 몰래 요청을 보낼 수 있다
+    # (CSRF: Content-Type을 text/plain으로 보내면 사전확인 없이 POST가 그대로 실행됨 /
+    # DNS rebinding: 공격자 도메인이 127.0.0.1을 가리키게 함). 그래서 모든 요청의
+    # Host(접속 주소)와 Origin(요청을 보낸 페이지)이 로컬 주소일 때만 받는다.
+    # 나중에 폰 접속 경로(Tailscale 등)가 생기면 그 호스트 이름만 ALLOWED_HOSTS에 추가한다.
+    ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+
+    def _host_only(self, netloc):
+        netloc = (netloc or "").strip().lower()
+        if netloc.startswith("["):
+            return netloc.split("]")[0] + "]"
+        return netloc.split(":")[0]
+
+    def _guard(self):
+        host = self._host_only(self.headers.get("Host"))
+        origin = self.headers.get("Origin")
+        site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+        bad = None
+        if host not in self.ALLOWED_HOSTS:
+            bad = f"Host={host!r}"
+        elif origin is not None and self._host_only(urlparse(origin).netloc) not in self.ALLOWED_HOSTS:
+            bad = f"Origin={origin!r}"
+        elif site in ("cross-site", "same-site"):
+            bad = f"Sec-Fetch-Site={site}"
+        if bad:
+            try:
+                with WORKBENCH_ACCESS_LOG.open("a", encoding="utf-8") as fh:
+                    fh.write(now_text() + f" [Workbench] 차단된 요청 {bad} {self.command} {self.path}" + chr(10))
+            except Exception:
+                pass
+            self.send_json({"error": "forbidden"}, 403)
+            return False
+        return True
+
     def do_GET(self):
+        if not self._guard():
+            return
         try:
             parsed = urlparse(self.path)
             if parsed.path == "/":
                 payload = render_dashboard_page().encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if parsed.path == "/m":
+                payload = render_mobile_m_page().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
@@ -260,6 +332,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, 500)
 
     def do_POST(self):
+        if not self._guard():
+            return
         try:
             parsed = urlparse(self.path)
             if parsed.path == "/api/history/reindex":
@@ -437,6 +511,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/sap/stop_loop":
                 self.send_json(sap_stop_loop())
+                return
+            if parsed.path == "/api/mobile/open":
+                self.send_json(open_mobile_window_proc())
                 return
             if parsed.path == "/api/workbench/restart":
                 self.send_json(workbench_force_restart())
@@ -618,6 +695,11 @@ def serve(host, port, open_browser=True, page=""):
     ThreadingHTTPServer.allow_reuse_address = False
     ensure_db()
     threading.Thread(target=_sap_loop_watchdog_thread, daemon=True).start()
+    try:   # 2026-10-16: 폰 텔레그램 리모컨(telegram_bot.py) - 설정 파일이 없으면 아무것도 안 함, 실패해도 서버는 계속
+        import telegram_bot
+        telegram_bot.start_background()
+    except Exception:
+        logger.warning("텔레그램 봇 시작 실패(무시)", exc_info=True)
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"Workbench running: {url}", flush=True)
     logger.info(f"Workbench 서버 시작: {url} (PID {os.getpid()})")
@@ -630,7 +712,7 @@ def serve(host, port, open_browser=True, page=""):
     # 막으면 안 되므로 예외는 무조건 삼킨다.
     try:
         from win_notify import send_windows_notification
-        send_windows_notification("Workbench 시작됨", url, duration="short")
+        send_windows_notification("Workbench 시작됨", url, duration="short", telegram=False)
     except Exception:
         logger.warning("시작 토스트 알림 실패(무시)", exc_info=True)
     if open_browser:

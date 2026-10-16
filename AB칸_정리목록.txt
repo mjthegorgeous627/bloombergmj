@@ -1,0 +1,70 @@
+﻿'A / B'로 합쳐 둔 칸 목록 (2026-10-09 기준, 총 17칸)
+각 칸에서 맞는 쪽만 남기면 됩니다. 공유 = 예전 공유파일 값, 마감 = 예전 마감파일 값.
+
+[8-18 시트 H3]
+  공유: Delivery Note: ⏎  ⏎ Caller Information: ⏎ Caller Name: DOHUN LEE ⏎ Floor Information: 12 ⏎ (delivery date: 08/17/2026)
+  마감: 8월18일 배송함
+
+[8-18 시트 H4]
+  공유: 목요일 휴가라고함 ⏎ 화요일 배송 요청 
+  마감: 목요일 휴가 ⏎ 화요일 요청
+
+[8-18 시트 H5]
+  공유: 목요일 휴가라고함 ⏎ 화요일 배송 요청  ⏎ SDSK 1332512540
+  마감: 목요일 휴가 ⏎ 화요일 요청
+
+[8-19 시트 F11]
+  공유: 010-6321-5636 
+  마감: 001-0632-1563
+
+[8-19 시트 H17]
+  공유: 물품 보관함 6507/0011
+  마감: 8/19 2시에 배송 ⏎ 2개 warehouse보관 ⏎ 3개 office로 배송되었음
+
+[8-20 시트 G3]
+  공유: GYEONGNAM INVESTMENT & BUSINESS AGC ⏎ 경상남도 창원시 성산구 창원대로 524 경남사회적경제혁신타운 4층  경남투자경제진흥원 ⏎ (cust# 100306568)
+  마감: GYEONGNAM INVESTMENT & BUSINESS AGC ⏎ EUICHANGGU WONEEDAERO 362, ⏎ ,CHANGWON CONVENTION CENTER 1F ⏎ (cust# 100306568)
+
+[8-20 시트 G4]
+  공유: BARING ASSET MANAGEMENT KOREA LIMIT ⏎ 87 ULJIRO 1-GA CHUNG-GU ⏎ SAMSUNG FIRE&MARINE BUIDING, FLOOR7 ⏎ (cust# 300475)
+  마감: BARING ASSET MANAGEMENT KOREA LIMIT ⏎ 87 ULJIRO 1-GA CHUNG-GU, ⏎ SAMSUNG FIRE&MARINE BUIDING, FLOOR7 ⏎ (cust# 300475)
+
+[8-20 시트 H4]
+  공유: Gunho Lee (이건호) ⏎ Associate Director | Korea IT, GTD ⏎ +82 2 3788 0565 ⏎ +82 10 6512 6008 personal mobile ⏎ +82 10 3456 7958
+  마감: 날짜 경미님이 알려주기로함 ⏎ 목요일 혹은 금요일
+
+[8-20 시트 F5]
+  공유: 02-2002-0535
+  마감: 02-729-0535
+
+[8-20 시트 H6]
+  공유: 키보드 421->196 교체요청 bcs에서
+  마감: done
+
+[8-21 시트 F11]
+  공유: 02-3787-7926
+  마감: 02-3787-7956
+
+[8-26 시트 H3]
+  공유: (delivery date: 08/28/2026)
+  마감: 두명에게 전달
+
+[8-27 시트 E3]
+  공유: JUEUN CHOI
+  마감: HYUN SOO KIM
+
+[8-27 시트 G3]
+  공유: KOREA POST ⏎ 세종특별자치시 도움5로 19 ⏎ 우정사업본부 19 DOUM 5-RO, ⏎ 8TH-DONG GOVERNMENT COMPLEX-SEJONG ⏎ (cust# 30235463)5층 예금증권운용과
+  마감: KOREA POST ⏎ 세종특별자치시 도움5로 19 ⏎ 우정사업본부 ⏎ 19 DOUM 5-RO, ⏎ 8TH-DONG GOVERNMENT COMPLEX-SEJONG ⏎ (cust# 30235463) 5층 예금증권운용과
+
+[8-27 시트 H3]
+  공유: 우체국 4500원
+  마감: 우체국 : 4500원
+
+[8-27 시트 H20]
+  공유: (delivery date: 08/28/2026)
+  마감: 12시30
+
+[9-18 시트 H3]
+  공유: 1) 퀵 리프트 트럭 :  ⏎  총 193800 원 (부가세포함) ⏎  ⏎ 가는 것 : 8만원 *1.1 ⏎ 오는 것 : 9만원(야간) *1.1 ⏎ 주차비 6800 원 ⏎  ⏎ 2) 인부 2명x2번 : 20만원 (5x4) ⏎  ⏎ 3) Taxi : 10900 원 ⏎  ⏎ pls deliver these 20x bank bags together with other items from office - {SDSK 1334683623 <GO>} to SeMA on Sep 18
+  마감: 1) 퀵 리프트 트럭 :  ⏎  총 193800 원 (부가세포함) ⏎  ⏎ 가는 것 : 8만원 *1.1 ⏎ 오는 것 : 9만원(야간) *1.1 ⏎ 주차비 6800 원 ⏎  ⏎ 2) 인부 20만원  ⏎ 5만x2명x2번 ⏎  ⏎ 3) Taxi : 10900 원  ⏎  ⏎ pls deliver these 20x bank bags together with other items from office - {SDSK 1334683623 <GO>} to SeMA on Sep 18

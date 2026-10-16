@@ -34,11 +34,17 @@ def _no_window_popen(*args, **kwargs):
 winotify.subprocess.Popen = _no_window_popen
 
 
-def send_windows_notification(title, message, duration="long"):
+def send_windows_notification(title, message, duration="long", telegram=True):
     """
     윈도우 액션 센터 토스트 알림 전송.
     반환: True(성공) / False(실패, 무시하고 계속 진행 가능)
     """
+    if telegram:
+        try:
+            from telegram_notify import send_telegram
+            send_telegram(f"{title}{chr(10)}{message}".strip() if message else title)
+        except Exception:
+            pass
     try:
         toast = Notification(
             app_id="배송장 워크벤치",

@@ -197,4 +197,9 @@ def send_kakao_order(order_data_list):
         logger.warning("[카카오] 메시지 생성 실패 (데이터 없음)")
         return False
     logger.info(f"[카카오] 메시지:\n{'-'*30}\n{message}\n{'-'*30}")
+    try:
+        from telegram_notify import send_order, order_action
+        send_order(message, order_action(order_data_list))   # 폰 푸시용(영업시간/아침요약 규칙은 telegram_notify.py) - 카톡 성공/실패와 무관
+    except Exception:
+        logger.warning("[텔레그램] 전송 호출 실패(무시)", exc_info=True)
     return send_kakao_message(message)

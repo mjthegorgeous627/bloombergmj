@@ -1,0 +1,270 @@
+*{box-sizing:border-box}
+:root{
+  font-family:-apple-system,"Segoe UI","Malgun Gothic",Arial,sans-serif;
+  color:#1e293b;background:#f1f4f9;
+  --line:#e2e8f0; --line-strong:#cbd5e1;
+}
+body{margin:0}
+
+.sticky-top{position:sticky;top:0;z-index:20;background:#f1f4f9;
+  box-shadow:0 4px 10px rgba(15,23,42,.08)}
+
+.topbar{height:38px;background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;
+  display:flex;align-items:center;justify-content:space-between;padding:0 18px;
+  box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.topbar h1{font-size:14.5px;margin:0;font-weight:600;letter-spacing:.2px}
+.topbar-right{display:flex;align-items:center;gap:12px}
+#clock{font-size:11.5px;color:#cbd5e1;font-variant-numeric:tabular-nums}
+#sapLoopWrap{position:relative}
+#sapLoopStatus{font-size:11.5px;display:flex;align-items:center;gap:5px;cursor:pointer;
+  padding:3px 6px;border-radius:5px;user-select:none}
+#sapLoopStatus:hover{background:rgba(255,255,255,.1)}
+#sapLoopStatus .dot{width:7px;height:7px;border-radius:50%;background:#64748b;display:inline-block}
+#sapLoopStatus.running .dot{background:#22c55e;box-shadow:0 0 4px #22c55e}
+#sapLoopStatus.running{color:#86efac}
+#sapLoopStatus.stopped .dot{background:#f87171}
+#sapLoopStatus.stopped{color:#fca5a5}
+/* 2026-09-13 사용자 요청: 주말/공휴일(자동화가 안 도는 날)을 달력 숫자로
+   빨갛게 보여주고, 그 외 날짜(임시공휴일 등)도 클릭으로 수동 지정 가능하게 -
+   시계 옆 📅 버튼을 눌러서 여는 드롭다운, 위 sapLoopMenu와 같은 패턴. */
+#calWrap{position:relative}
+.cal-toggle-btn{background:none;border:1px solid #475569;border-radius:5px;color:#cbd5e1;
+  font-size:13px;padding:3px 7px;cursor:pointer;line-height:1}
+.cal-toggle-btn:hover{background:#334155}
+#calPanel{display:none;position:absolute;top:100%;right:0;margin-top:4px;
+  background:#1e293b;border:1px solid #334155;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.35);
+  padding:10px;z-index:50;width:220px}
+#calPanel.open{display:block}
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.cal-head button{background:none;border:none;color:#cbd5e1;font-size:13px;cursor:pointer;padding:2px 6px}
+.cal-head button:hover{color:#fff}
+.cal-title{color:#e2e8f0;font-size:12.5px;font-weight:600}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.cal-wd{color:#64748b;font-size:10.5px;padding:2px 0}
+.cal-day{color:#e2e8f0;font-size:11.5px;padding:4px 0;border-radius:5px;cursor:pointer}
+.cal-day:hover{background:#334155}
+.cal-day.nonworking{color:#f87171;font-weight:700}
+.cal-day.today{box-shadow:inset 0 0 0 1px #60a5fa}
+.cal-legend{margin-top:6px;font-size:10px;color:#94a3b8;line-height:1.4}
+
+/* 2026-08-28: 트레이 아이콘 우클릭 메뉴와 같은 기능(시작/중지/강제 재시작)을
+   페이지 안에서도 쓰게 - 시계 옆 상태 점을 눌러서 여는 드롭다운. */
+#sapLoopMenu{display:none;position:absolute;top:100%;right:0;margin-top:4px;
+  background:#1e293b;border:1px solid #334155;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.35);
+  min-width:190px;z-index:50;overflow:hidden}
+#sapLoopMenu.open{display:block}
+#sapLoopMenu button{display:block;width:100%;text-align:left;background:none;border:none;
+  color:#e2e8f0;font-size:12px;padding:9px 12px;cursor:pointer}
+#sapLoopMenu button:hover{background:#334155}
+#sapLoopMenu button.danger{color:#fca5a5}
+#sapLoopMenu hr{border:none;border-top:1px solid #334155;margin:2px 0}
+
+.controls{display:flex;align-items:flex-start;gap:8px;padding:8px 12px 0}
+.ctrl-col{flex:1;background:#fff;border:1px solid var(--line);border-radius:8px;
+  padding:7px 9px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.ctrl-col h3{margin:0 0 5px;font-size:11px;font-weight:700;color:#64748b;
+  text-transform:uppercase;letter-spacing:.5px;cursor:pointer;user-select:none;
+  display:flex;align-items:center;justify-content:space-between}
+.ctrl-col-toggle{font-size:10px;color:#94a3b8}
+.ctrl-col.collapsed .ctrl-col-body{display:none}
+.ctrl-col.collapsed h3{margin-bottom:0}
+.ctrl-divider{height:1px;background:var(--line);margin:5px 0}
+/* 2026-08-25: 세로로 한 줄씩 쌓이던 짧은 버튼들을 같은 줄에 여러 개 묶어서
+   컨트롤 패널 전체 높이를 줄이기 위한 그리드 래퍼 - 컨트롤 패널이 커져서
+   그 아래 오더 목록이 안 보이는 문제(사용자 신고, 2026-08-25) 대응. 긴
+   설명형 버튼(예: "4-2. S/N 오더 반영 시도...")은 여기 넣지 않고 기존처럼
+   한 줄 전체를 씀 - 그리드에 넣으면 줄바꿈이 심해져 오히려 더 높아짐.*/
+.btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:5px}
+.btn-grid.cols4{grid-template-columns:repeat(4,1fr)}
+.btn-grid .btn.block{margin-bottom:0}
+
+.btn{height:26px;border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:0 10px;
+  cursor:pointer;font-size:12px;color:#334155;transition:background .12s,box-shadow .12s,transform .05s}
+.btn:hover{background:#f8fafc;box-shadow:0 1px 2px rgba(15,23,42,.06)}
+.btn:active{transform:translateY(1px)}
+.btn.block{display:block;width:100%;text-align:left;height:auto;padding:5px 9px;
+  margin-bottom:4px;line-height:1.25;font-weight:500}
+.btn.primary{background:#2563eb;color:#fff;border-color:#2563eb}
+.btn.primary:hover{background:#1d4ed8}
+.btn.warn{background:#dc2626;border-color:#dc2626;color:#fff;font-weight:700}
+.btn.warn:hover{background:#b91c1c}
+.btn.finish{background:#0f172a;color:#fff;border-color:#0f172a}
+.btn.finish:hover{background:#1e293b}
+.btn.muted{background:#6b7280;color:#fff;border-color:#6b7280}
+.btn.muted:hover{background:#4b5563}
+.btn.billed{background:#16a34a;color:#fff;border-color:#16a34a}
+.btn.billed:hover{background:#15803d}
+.btn.billed.tiny{padding:2px 6px;font-size:10.5px;width:auto;display:inline-block;margin:3px 0 0 0}
+.item-row.row-billed td{background:#bbf7d0}
+.item-row.row-billed:hover td{background:#86efac}
+.btn .hint{font-size:10.5px;font-weight:400;opacity:.8;display:block;margin-top:1px}
+.merge-field-row{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:11.5px;color:#475569;
+  margin:2px 0 7px;padding:6px 8px;background:#f8fafc;border:1px solid var(--line);border-radius:7px}
+.merge-field-row label{display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap}
+.merge-field-row input{cursor:pointer}
+.ctrl-inline{display:flex;gap:6px;margin-bottom:7px}
+.ctrl-inline .btn{flex:1.3;text-align:left}
+.ctrl-inline input{flex:1;border:1px solid var(--line-strong);border-radius:7px;padding:0 9px;
+  font-size:12.5px;color:#1e293b}
+.ctrl-inline input:focus{outline:2px solid #93c5fd;outline-offset:-1px}
+
+.board-wrap{margin:16px;background:#fff;border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 1px 2px rgba(15,23,42,.04)}
+table.board-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}
+.board-table thead th{position:sticky;top:var(--sticky-top-h,0px);z-index:5;background:#e8720c;color:#fff;
+  text-align:center;padding:9px 10px;font-weight:600;letter-spacing:.2px;
+  box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.board-table thead th:first-child{border-top-left-radius:0}
+
+/* 2026-08-27 user request: 날짜 배너 줄(예: "2026. 08. 26 수요일")이 너무 높아서
+   화면에 보이는 오더 행 수가 줄어듦 - padding/font-size를 줄여 한 줄당 높이를
+   압축(약 40px→28px), 그만큼 아래 오더 목록이 더 많이 보이도록. */
+.date-banner-row td{background:linear-gradient(90deg,#1e3a5f,#25507e);color:#fff;
+  font-weight:600;font-size:12.5px;padding:5px 12px;letter-spacing:.2px}
+.date-banner-inner{display:flex;align-items:center;justify-content:space-between}
+.date-banner-right{display:flex;align-items:center;gap:10px}
+.date-export-check{width:14px;height:14px;cursor:pointer}
+.date-toggle{background:transparent;border:none;color:#fff;font-size:12px;cursor:pointer;
+  padding:1px 8px;border-radius:5px;line-height:1.3}
+.date-toggle:hover{background:rgba(255,255,255,.18)}
+tbody.date-group.collapsed .item-row,tbody.date-group.collapsed .empty-row{display:none}
+
+/* 2026-08-27 user request: 오더 라인 간격/글자 조금 줄이기 (너무 많이는 말고) -
+   board-table font-size 12.5→12px과 함께, 줄 하나당 약 3-4px 정도만 압축. */
+.item-row td{padding:5px 10px;border-bottom:1px solid var(--line);vertical-align:middle;
+  background:#fff;transition:background .12s}
+.item-row:hover td{background:#f8fafc}
+.item-row[draggable="true"]{cursor:grab}
+.item-row.dragging{opacity:.35}
+.item-row.drop-before td{box-shadow:inset 0 2px 0 0 #2563eb}
+.item-row.drop-after td{box-shadow:inset 0 -2px 0 0 #2563eb}
+.item-row.row-done td{background:#bfdbfe}
+.item-row.row-done:hover td{background:#93c5fd}
+.item-row.row-pending td{background:#fecaca}
+.item-row.row-pending:hover td{background:#fca5a5}
+.item-row.row-cancelled td{background:#d1d5db;color:#6b7280;text-decoration:line-through}
+.item-row.row-cancelled:hover td{background:#b0b6c0}
+/* Portal(Serial/QR) 또는 POD 자동화 실패 표시 (todo b, 2026-08-18) - done(파랑)/
+   pending(빨강)과 안 겹치는 주황 계열, 다음 재실행이 성공하면 서버가
+   portal_error/pod_error를 비워서 자동으로 사라짐. row-pending 등과 동시에
+   붙어도(둘 다 해당하는 행) CSS 선언 순서상 이게 이겨서 실패가 우선 보임. */
+.item-row.row-error td{background:#fed7aa;box-shadow:inset 4px 0 0 0 #ea580c}
+.item-row.row-error:hover td{background:#fdba74}
+.order-error-badge{cursor:pointer;margin-left:4px;color:#ea580c;font-weight:700}
+
+.type-cell{text-align:center}
+.type-select{font-weight:700;border:1px solid transparent;background:transparent;
+  border-radius:5px;padding:2px 4px;cursor:pointer;font-size:12px}
+.type-select:hover{border-color:var(--line-strong)}
+.type-delivery{color:#2563eb}
+.type-pickup{color:#dc2626}
+.type-other{color:#9333ea}
+.ord-cell{font-weight:600}
+.ord-cell .muted{display:block;font-weight:400;color:#94a3b8;font-size:11px;margin-top:3px;white-space:pre-wrap}
+.order-select-all{float:right;width:14px;height:14px;cursor:pointer;margin-left:6px}
+.cust-cell{color:#334155;white-space:pre-wrap}
+.addr-cell::first-line{font-weight:700;color:#1e293b}
+.check-cell{text-align:center}
+.check-cell input{width:15px;height:15px;cursor:pointer}
+.handle-cell{text-align:center;cursor:grab}
+.drag-handle{display:inline-block;color:#cbd5e1;font-size:15px;cursor:grab;user-select:none}
+.drag-handle:hover{color:#94a3b8}
+
+[contenteditable="true"]{outline:none;border-radius:5px;padding:2px 4px;margin:-2px -4px;
+  cursor:text;min-height:1.2em}
+[contenteditable="true"]:hover{background:#f8fafc}
+[contenteditable="true"]:focus{background:#eff6ff;box-shadow:0 0 0 2px #93c5fd}
+
+.board-table thead th:nth-child(1){width:3%}
+.board-table thead th:nth-child(2){width:5%}
+.board-table thead th:nth-child(3){width:4%}
+.board-table thead th:nth-child(4){width:9%}
+.board-table thead th:nth-child(5){width:15%}
+.board-table thead th:nth-child(6){width:6%}
+.board-table thead th:nth-child(7){width:7%}
+.board-table thead th:nth-child(8){width:7%}
+.board-table thead th:nth-child(9){width:6%}
+.board-table thead th:nth-child(10){width:16%}
+.board-table thead th:nth-child(11){width:8%}
+/* Column width/alignment on body rows is keyed by explicit class, NOT
+   nth-child - a merged group's non-first rows omit the rowspan'd Order#/
+   Customer/Phone/Address/Memo <td>s entirely (they're covered by the first
+   row's rowspan), which shifts every later cell's nth-child index left of
+   its true column. nth-child rules here silently applied the WRONG
+   column's width/alignment to Item/M-N/S-N/check on every row after a
+   group's first - this is what caused the "first row looks right, every
+   row after it looks off" misalignment. Classes don't shift with cell
+   count, so this class is what's now considered authoritative. */
+.item-row td.handle-cell{width:3%}
+.item-row td.type-cell{width:5%}
+.item-row td.ord-cell{width:9%}
+.item-row td.item-cell{width:15%;white-space:pre-wrap}
+.item-row td.mn-cell{width:6%;text-align:center;white-space:pre-wrap}
+.item-row td.sn-cell{width:7%;text-align:center;white-space:pre-wrap}
+.item-row td.customer-cell{width:7%;text-align:center}
+.item-row td.phone-cell{width:6%;text-align:center}
+.item-row td.addr-cell{width:16%;text-align:center}
+.item-row td.memo-cell{width:8%;text-align:center}
+.item-row td.check-cell{width:4%}
+
+.empty-row td{padding:22px 10px;text-align:center;color:#94a3b8;font-size:12.5px}
+.date-group.drag-over .date-banner-row td{background:linear-gradient(90deg,#2563eb,#3b82f6)}
+
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:#0f172a;color:#fff;padding:10px 18px;border-radius:8px;opacity:0;
+  transition:.25s;font-size:13px;z-index:50;max-width:80vw;text-align:center;
+  box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.trash-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100;
+  align-items:flex-start;justify-content:center;padding:40px 20px}
+.trash-overlay.show{display:flex}
+.trash-panel{background:#fff;border-radius:10px;max-width:1000px;width:100%;max-height:85vh;
+  overflow-y:auto;padding:16px 20px;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+.trash-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.trash-header h3{font-size:15px}
+.trash-list{margin-top:10px}
+.trash-table{width:100%;border-collapse:collapse;font-size:12px}
+.trash-table th{text-align:left;padding:6px 8px;border-bottom:2px solid var(--line-strong);
+  color:#64748b;font-weight:600}
+.trash-table td{padding:6px 8px;border-bottom:1px solid var(--line)}
+.trash-empty{padding:20px;text-align:center;color:#94a3b8;font-size:12.5px}
+
+/* 배송장 인쇄: hidden on screen, only shown (and only content left visible)
+   inside @media print. Built fresh from scratch, plain black-on-white table -
+   deliberately NOT reusing .board-table's classes/colors, so the printed
+   slip stays forced-B&W regardless of the board's on-screen styling or the
+   browser's own "background graphics" print setting. */
+#printArea{display:none}
+.print-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9.5px;color:#000;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}
+.print-table th,.print-table td{border:1px solid #000;padding:3px 4px;text-align:left;
+  vertical-align:top;white-space:pre-wrap;word-break:break-word;background:#fff;color:#000}
+.print-table th{font-weight:700;text-align:center}
+.print-table td:nth-child(4),.print-table td:nth-child(5){text-align:center}
+.print-table tr{break-inside:avoid}
+/* 배송 강조: 흑백 인쇄에서도 배경 음영은 회색 톤으로 남는다(위 print-color-adjust:exact
+   가 브라우저의 "배경 그래픽" 인쇄 옵션 체크 여부와 무관하게 강제 출력되게 함).
+   혹시 그마저 안 찍히는 환경 대비로 테두리 두께도 같이 바꿔 이중 안전장치를 둠 -
+   회수는 기존 그대로(흰 배경/얇은 테두리), 배송만 음영+굵은 테두리로 대비. */
+.print-table td.print-type-delivery{background:#c2c2c2;font-weight:700;border-width:2px}
+#printArea h2{font-size:15px;margin:0 0 6px;color:#000}
+#printArea h3{font-size:12px;margin:14px 0 4px;color:#000}
+#printArea h3:first-of-type{margin-top:0}
+@media print{
+  @page{size:A4 landscape;margin:10mm}
+  body>*:not(#printArea){display:none!important}
+  #printArea{display:block!important}
+}
+
+.hl-menu{position:fixed;z-index:200;background:#fff;border:1px solid var(--line-strong);
+  border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);padding:4px;
+  display:flex;flex-direction:column;min-width:130px}
+.hl-menu-btn{display:block;width:100%;text-align:left;border:none;background:none;
+  padding:6px 10px;font-size:12px;border-radius:5px;cursor:pointer;color:#334155}
+.hl-menu-btn:hover{background:#f1f5f9}
+.hl-menu-btn.hl-swatch-yellow{background:#fde047}
+.hl-menu-btn.hl-swatch-yellow:hover{background:#facc15}
+.hl-menu-btn.hl-swatch-pink{background:#f9a8d4}
+.hl-menu-btn.hl-swatch-pink:hover{background:#f472b6}
+.hl-menu-btn.hl-swatch-red{color:#dc2626;font-weight:700}

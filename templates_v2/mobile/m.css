@@ -1,0 +1,89 @@
+/* /m 모바일 화면 - PC(v2) 화면 위에 얹는 층. PC의 표/사이드바는 화면에서만 숨기고(DOM은 그대로 둔다) 같은 JS 함수를 그대로 쓴다. */
+body.m-mode{margin:0;background:#f1f4f9;font-family:-apple-system,"Malgun Gothic",sans-serif;font-size:14px;color:#0f172a;padding-bottom:210px}
+body.m-mode .sticky-top,body.m-mode .board-wrap,body.m-mode #sideCol,body.m-mode #flagFilterBar,body.m-mode #hiddenCtl,body.m-mode .controls{display:none !important}
+@media print{body.m-mode #mApp{display:none !important}}
+
+#mApp *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+.m-top{position:sticky;top:0;z-index:30;color:#fff;padding:9px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.m-top.t-board{background:#1d4ed8}.m-top.t-work{background:#c2410c}.m-top.t-ticket{background:#6d28d9}
+.m-top b{font-size:19px}
+.m-top small{display:flex;align-items:center;gap:5px;font-size:11.5px;color:#e2e8f0;margin-top:1px}
+.m-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#94a3b8}
+.m-dot.on{background:#22c55e;box-shadow:0 0 5px #22c55e}.m-dot.off{background:#f87171}
+.m-top .m-r{display:flex;align-items:center;gap:6px;font-size:11px}
+.m-ico{border:0;background:rgba(255,255,255,.18);color:#fff;border-radius:8px;width:34px;height:30px;font-size:16px}
+.m-alert{background:#fee2e2;color:#991b1b;padding:7px 12px;font-size:12.5px;font-weight:700;display:flex;justify-content:space-between;cursor:pointer}
+.m-alert[hidden]{display:none}
+.m-chips{display:flex;gap:6px;padding:8px 10px;background:#fff;border-bottom:1px solid #e2e8f0;overflow-x:auto;position:sticky;top:48px;z-index:20}
+.m-chip{flex:0 0 auto;padding:5px 11px;border-radius:99px;background:#e2e8f0;font-size:12.5px;font-weight:700;white-space:nowrap;color:#334155}
+.m-chip.today{background:#2563eb;color:#fff}.m-chip i{font-style:normal;opacity:.75;font-weight:400}
+#mSearch{width:calc(100% - 20px);margin:8px 10px 0;padding:9px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;background:#fff}
+.m-list{padding:6px 10px 0}
+.m-dh{font-size:12px;font-weight:700;color:#64748b;margin:12px 2px 6px}
+.m-card{background:#fff;border-radius:10px;margin-bottom:7px;display:flex;border-left:5px solid #cbd5e1;box-shadow:0 1px 2px rgba(0,0,0,.08);overflow:hidden}
+.m-card.done{border-color:#60a5fa;background:#eff6ff}.m-card.ready{border-color:#ef4444;background:#fef2f2}
+.m-card.cancel{border-color:#9ca3af;background:#f3f4f6;opacity:.75}.m-card.billed{border-color:#22c55e;background:#f0fdf4}
+.m-card.err{border-color:#dc2626}.m-card.sel{outline:2px solid #2563eb}
+.m-chk{width:40px;display:flex;align-items:flex-start;justify-content:center;padding-top:11px;flex:none}
+.m-chk input{width:21px;height:21px}
+.m-body{flex:1;min-width:0;padding:8px 8px 8px 0}
+.m-l1{display:flex;justify-content:space-between;gap:6px;align-items:flex-start}
+.m-on{font-weight:800;font-size:14.5px;word-break:break-all}
+.m-tags{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.m-tag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:99px;background:#e0e7ff;color:#3730a3;white-space:nowrap}
+.m-tag.r{background:#fee2e2;color:#b91c1c}.m-tag.o{background:#ffedd5;color:#9a3412}
+.m-sum{font-weight:700;font-size:13px;margin-top:3px;word-break:break-word}
+.m-sub{font-size:11.5px;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-memo{font-size:11.5px;background:#fef9c3;border-radius:5px;padding:2px 6px;margin-top:4px;display:inline-block;max-width:100%;word-break:break-word}
+.m-exp{border-top:1px dashed #cbd5e1;margin-top:7px;padding-top:7px;font-size:12.5px;line-height:1.6}
+.m-exp .k{color:#64748b;display:inline-block;width:42px}
+.m-exp a{color:#2563eb;font-weight:700;text-decoration:none}
+.m-item{margin-top:6px;padding:6px;background:#f8fafc;border-radius:8px}
+.m-item .m-it{font-size:12px;color:#334155}
+.m-item .m-st{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;background:#cbd5e1}
+.m-st.done{background:#3b82f6}.m-st.pending{background:#ef4444}.m-st.cancelled{background:#9ca3af}.m-st.billed{background:#22c55e}
+.m-in{width:100%;margin-top:4px;border:1px solid #94a3b8;border-radius:7px;padding:8px;font-size:14px;background:#fff}
+.m-in.empty{border-color:#ef4444}
+.m-ta{min-height:54px;background:#fef9c3;resize:vertical}
+.m-err{color:#b91c1c;font-size:12px;margin-top:4px;white-space:pre-wrap}
+.m-lbl{font-size:11px;color:#64748b;margin-top:6px}
+
+#mBar{position:fixed;left:0;right:0;bottom:58px;background:#0f172a;padding:7px 8px;display:none;flex-direction:column;gap:6px;z-index:40}
+#mBar.show{display:flex}
+#mBar .r1,#mBar .r2{display:flex;gap:6px;align-items:center}
+#mBar .n{background:none;border:0;color:#fff;font-size:12px;font-weight:700;width:58px;line-height:1.2;text-align:left;padding:0}
+#mBar .n i{font-style:normal;opacity:.7}
+#mBar.min .more{display:none}
+#mBar.min .n i{display:inline-block;transform:rotate(-90deg)}
+.m-ab{flex:1;border:0;border-radius:8px;padding:11px 0;font-weight:700;font-size:13px;color:#fff}
+.m-ab.d{background:#2563eb}.m-ab.p{background:#1d4ed8}.m-ab.r{background:#dc2626}.m-ab.c{background:#6b7280}.m-ab.z{background:#fff;color:#334155}
+#mTabs{position:fixed;left:0;right:0;bottom:0;height:58px;background:#fff;border-top:1px solid #e2e8f0;display:flex;z-index:41}
+.m-tab{flex:1;border:0;background:#fff;text-align:center;font-size:11px;color:#94a3b8;border-top:3px solid transparent;padding-top:6px}
+.m-tab b{display:block;font-size:19px;font-weight:400}
+.m-tab.on{font-weight:800}
+.m-tab[data-p=board].on{color:#1d4ed8;border-top-color:#1d4ed8;background:#dbeafe}
+.m-tab[data-p=work].on{color:#c2410c;border-top-color:#c2410c;background:#ffedd5}
+.m-tab[data-p=ticket].on{color:#6d28d9;border-top-color:#6d28d9;background:#ede9fe}
+
+.m-sec{background:#fff;margin:8px 10px;border-radius:12px;padding:10px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.m-sec h4{font-size:11.5px;color:#64748b;margin:0 0 7px;letter-spacing:.3px}
+.m-g2{display:grid;grid-template-columns:1fr 1fr;gap:7px}.m-g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}.m-g4{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.m-bt{border:1px solid #d1d5db;border-radius:9px;padding:12px 4px;text-align:center;font-weight:700;font-size:13px;background:#fff;color:#334155}
+.m-bt:active{background:#f1f5f9}.m-bt.p{background:#2563eb;color:#fff;border-color:#2563eb}.m-bt.w{background:#fee2e2;color:#b91c1c;border-color:#fecaca}
+.m-bt.s{font-size:12px;padding:10px 2px}.m-bt small{display:block;font-size:10px;font-weight:400;color:#64748b;margin-top:1px}.m-bt.p small{color:#dbeafe}
+.m-bt[disabled]{opacity:.55}
+.m-sub2{font-size:11px;color:#64748b;margin:7px 2px 0}
+.m-msg{font-size:12.5px;color:#334155;margin-top:8px;white-space:pre-wrap}
+#mApp [hidden]{display:none !important}
+
+/* PC용 팝업(확인창/티켓 결과/POD 등)이 좁은 화면 밖으로 넘치지 않게 */
+body.m-mode .trash-overlay>div,body.m-mode [id$="Overlay"]>div{max-width:96vw !important;max-height:92vh;overflow:auto}
+/* 티켓 결과 팝업 안의 표(#1 이름 내용 날짜)가 좁게 눌리지 않고 글줄처럼 이어지게 */
+body.m-mode #ticketReportOverlay table,body.m-mode #ticketReportOverlay tbody,body.m-mode #ticketReportOverlay tr{display:block;width:100% !important}
+body.m-mode #ticketReportOverlay td,body.m-mode #ticketReportOverlay th{display:inline;padding:0 4px 0 0 !important;word-break:break-word}
+body.m-mode #ticketReportOverlay tr{margin-bottom:6px}
+body.m-mode #ticketReportOverlay div[style*="grid-template-columns"]{display:block !important;word-break:break-word}
+body.m-mode #ticketReportOverlay div[style*="grid-template-columns"]>*{display:inline;margin-right:6px}
+
+.m-dh{display:flex;justify-content:space-between;align-items:center}
+.m-selall{border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:7px;font-size:11.5px;font-weight:700;padding:4px 9px}

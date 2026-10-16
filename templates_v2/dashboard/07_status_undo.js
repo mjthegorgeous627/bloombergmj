@@ -266,6 +266,15 @@ async function importExcelRange(){
 // Address/Memo를 보드 화면과 똑같이 rowSpan으로 한 번만 찍는다.
 // computeAllFieldSpans는 인쇄 대상으로 뽑힌(체크된) 행들만 놓고 다시 돌려서 -
 // 화면엔 붙어 있어도 체크 안 된 오더/행까지 병합 셀에 끼어들지 않게 한다. --
+// 한 날짜의 모든 행(상태 무관)을 체크/해제한다 - 배송장 인쇄용 [전체선택] 버튼(PC 날짜 줄 / 모바일 날짜 제목)이 쓴다.
+// 이미 전부 체크돼 있으면 전부 해제. 마감용 날짜 체크박스(EXPORT_DATES)와는 별개다.
+function selectAllRowsOfDate(iso){
+  const cbs=ROWS.filter(r=>r.date===iso).map(r=>document.querySelector('.row-check[data-row-key="'+r.rowKey+'"]')).filter(Boolean);
+  if(!cbs.length) return false;
+  const on=!cbs.every(cb=>cb.checked);
+  cbs.forEach(cb=>{ if(cb.checked!==on){ cb.checked=on; cb.dispatchEvent(new Event('change')); } });
+  return on;
+}
 function printChecked(){
   const checkedRowKeys=new Set([...document.querySelectorAll('.row-check:checked')].map(cb=>cb.dataset.rowKey));
   const sections=[];
@@ -273,8 +282,14 @@ function printChecked(){
     const rows=ROWS.filter(r=>r.date===iso);
     const groups=groupRows(rows);
     const wholeDate=EXPORT_DATES.has(iso);
-    const selectedGroups=wholeDate ? groups : groups
-      .map(g=>({key:g.key, rows:g.rows.filter(r=>checkedRowKeys.has(r.rowKey))}))
+    // 2026-10-16: 날짜 줄 체크박스(마감용)를 눌러 '날짜 전체' 모드가 돼도, 그 체크박스가 자동으로
+    // 체크해 주는 상태(완료/취소/청구)의 행을 사용자가 직접 해제했으면 그 행은 인쇄에서 뺀다.
+    // (그 외 상태의 행은 날짜 체크박스가 원래 체크해 주지 않으므로 '체크 안 됨'이 '제외'를 뜻하지 않아 계속 포함.
+    //  임의의 행을 빼고 싶으면 날짜 줄의 [전체선택] 버튼 -> 빼고 싶은 행만 해제 -> 인쇄.)
+    const AUTO_CHECKED=new Set(['done','cancelled','billed']);
+    const selectedGroups=(wholeDate
+        ? groups.map(g=>({key:g.key, rows:g.rows.filter(r=>checkedRowKeys.has(r.rowKey) || !AUTO_CHECKED.has(r.uiStatus))}))
+        : groups.map(g=>({key:g.key, rows:g.rows.filter(r=>checkedRowKeys.has(r.rowKey))})))
       .filter(g=>g.rows.length);
     if(!selectedGroups.length) return;
     sections.push({iso, groups:selectedGroups, allSpans:computeAllFieldSpans(selectedGroups)});
@@ -294,7 +309,8 @@ function printChecked(){
     const h3=document.createElement('h3');
     // 인쇄물에는 "(Today)"/"(Tomorrow)" 같은 화면 전용 문구를 빼고 순수 날짜만.
     h3.textContent=labelFor(iso).replace(/\s*\((Today|Tomorrow)\)\s*$/,'');
-    if(si>0) h3.style.pageBreakBefore='always';
+    // 2026-10-16: 날짜가 달라도 새 페이지로 넘기지 않고 이어서 한 장에 찍는다(종이 절약). 내용이 길면 알아서 다음 장으로 넘어감.
+    h3.style.breakAfter='avoid';
     printArea.appendChild(h3);
 
     const table=document.createElement('table');

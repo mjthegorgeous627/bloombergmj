@@ -954,3 +954,13 @@ async function dayhFlush(){
   });
   if(st) st.textContent = bad ? ('⚠ ' + bad + '칸 저장 실패 (빨간 칸에 마우스를 올리면 이유가 보입니다)') : ('✓ ' + items.length + '칸 저장됨');
 }
+
+// 2026-10-16: 상단 [📱 모바일] - 폰 크기 /m 창을 오른쪽 모니터에 띄운다(mobile_window.py)
+async function openMobileWindow(){
+  try{
+    const res=await fetch('/api/mobile/open',{method:'POST'});
+    const data=await res.json();
+    if(!res.ok||data.error) throw new Error(data.error||'실패');
+    toast('모바일 창을 오른쪽 모니터에 띄웁니다 (몇 초 걸립니다)');
+  }catch(err){ toast('모바일 창 열기 실패: '+err.message); }
+}

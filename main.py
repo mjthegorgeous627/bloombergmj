@@ -129,7 +129,7 @@ def _write_and_notify(rows, order_id, processed):
     if message:
         lines = message.split('\n')
         toast_title, toast_body = lines[0], '\n'.join(lines[1:])
-        send_windows_notification(toast_title, toast_body)
+        send_windows_notification(toast_title, toast_body, telegram=False)
 
     # 2026-09-01 사용자 결정: 공유파일(EXCEL_PATH)에 매일 SAP 수집을 직접
     # 쓰던 걸 중단 - workbench가 이미 메인이라 그 파일에 "아직 확정 안 된"

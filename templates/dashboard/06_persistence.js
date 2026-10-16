@@ -202,6 +202,28 @@ async function restoreCheckedTrash(){
   location.reload();
 }
 
+// 2026-10-13: Done(파랑)/Ready(빨강)/Cancel(회색)/billed(초록) 처리된 행은 "일단락"이라
+// 해당 날짜 섹션의 맨 위로 처리한 순서대로 쌓는다 - 먼저 처리한 게 맨 위,
+// 나중에 처리한 게 그 아래. 이미 쌓여있던 행은 그대로 두고, 이번에 새로 처리된
+// 행을 그 뒤에 붙인 뒤 나머지(미처리) 행이 이어짐. 순서는 reorder API로 저장.
+const SETTLED_STATUSES=new Set(['done','pending','cancelled','billed']);
+async function stackSettledToTop(newItemIds){
+  const newSet=new Set(newItemIds);
+  const dates=[...new Set(ROWS.filter(r=>newSet.has(r.itemId)).map(r=>r.date))];
+  for(const iso of dates){
+    const dayRows=ROWS.filter(r=>r.date===iso);
+    const isSettled=r=>SETTLED_STATUSES.has(r.uiStatus);
+    const prev=dayRows.filter(r=>isSettled(r) && !newSet.has(r.itemId));
+    const fresh=dayRows.filter(r=>newSet.has(r.itemId) && isSettled(r));
+    const rest=dayRows.filter(r=>!prev.includes(r) && !fresh.includes(r));
+    const ordered=[...prev, ...fresh, ...rest];
+    const firstIdx=ROWS.findIndex(r=>r.date===iso);
+    ROWS=ROWS.filter(r=>r.date!==iso);
+    ROWS.splice(firstIdx, 0, ...ordered);
+    try{ await persistItemReorder(ordered.map(r=>r.itemId)); }
+    catch(err){ toast('순서 저장 실패: '+err.message); }
+  }
+}
 // -- Process: acts on whichever rows are checked, same checkboxes Portal uses --
 async function processDone(){
   const keys=[...document.querySelectorAll('.row-check:checked')].map(cb=>cb.dataset.rowKey);
@@ -212,6 +234,7 @@ async function processDone(){
   }catch(err){toast('완료 처리 저장 실패: '+err.message);return}
   keys.forEach(k=>{const row=ROWS.find(r=>r.rowKey===k); if(row) row.uiStatus='done'});
   clearRowErrorFlags(itemIds);
+  await stackSettledToTop(itemIds);
   renderAll();
   toast(keys.length+'건 완료 처리(파랑) - DB에 반영됨');
 }
@@ -226,6 +249,7 @@ async function processPickupReady(){
   }catch(err){toast('상태 저장 실패: '+err.message);return}
   checkedRows.forEach(row=>{row.uiStatus = row.itemType==='회수' ? 'pending' : 'done'});
   clearRowErrorFlags([...pendingIds, ...doneIds]);
+  await stackSettledToTop([...pendingIds, ...doneIds]);
   renderAll();
   toast(keys.length+'건 처리: 회수는 대기(빨강), 나머지는 완료(파랑) - DB에 반영됨');
 }
@@ -243,6 +267,7 @@ async function processCancel(){
   }catch(err){toast('취소 처리 저장 실패: '+err.message);return}
   keys.forEach(k=>{const row=ROWS.find(r=>r.rowKey===k); if(row) row.uiStatus='cancelled'});
   clearRowErrorFlags(itemIds);
+  await stackSettledToTop(itemIds);
   renderAll();
   toast(keys.length+'건 취소 처리(회색) - DB에 반영됨');
 }
@@ -258,6 +283,7 @@ async function processBilled(){
   }catch(err){toast('billed 저장 실패: '+err.message);return}
   keys.forEach(k=>{const row=ROWS.find(r=>r.rowKey===k); if(row) row.uiStatus='billed'});
   clearRowErrorFlags(itemIds);
+  await stackSettledToTop(itemIds);
   renderAll();
   toast(keys.length+'건 billed 처리(초록) - 대시보드 수량 제외');
 }

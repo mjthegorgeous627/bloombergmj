@@ -1,0 +1,72 @@
+<div id="mApp">
+  <header class="m-top t-board" id="mTop">
+    <div><b id="mTitle">▤ 보드</b><small><span class="m-dot" id="mLoopDot"></span><span id="mLoopTxt">확인 중…</span></small></div>
+    <div class="m-r"><button class="m-ico" onclick="undoLastAction()" title="실행취소">↶</button><button class="m-ico" onclick="redoLastAction()" title="다시실행">↷</button><span id="mClock"></span></div>
+  </header>
+
+  <section id="pgBoard">
+    <div class="m-alert" id="mAlert" hidden><span id="mAlertTxt"></span><span>보기›</span></div>
+    <div class="m-chips" id="mChips"></div>
+    <input id="mSearch" type="search" placeholder="오더번호 / 고객 / 주소 / 메모 검색…">
+    <div class="m-list" id="mList"></div>
+  </section>
+
+  <section id="pgWork" hidden>
+    <div class="m-sec"><h4>SAP</h4>
+      <div class="m-g3">
+        <button class="m-bt p s" onclick="runSap('all')">전체조회</button>
+        <button class="m-bt p s" onclick="runSap('start')">▶ Start Loop</button>
+        <button class="m-bt w s" onclick="runSap('stop')">■ 루프 정지</button>
+      </div>
+      <div class="m-sub2">개별 조회</div>
+      <div class="m-g4" style="margin-top:5px">
+        <button class="m-bt s" onclick="runSapSession(0)">VL06O</button>
+        <button class="m-bt s" onclick="runSapSession(1)">VL10G</button>
+        <button class="m-bt s" onclick="runSapSession(2)">RLKR</button>
+        <button class="m-bt s" onclick="runSapSession(3)">Q2</button>
+      </div>
+    </div>
+    <div class="m-sec"><h4>PORTAL</h4>
+      <div class="m-g2">
+        <button class="m-bt" onclick="openPortalLoginManual()">Portal 로그인<small>PC에서 B-Unit 인증 필요</small></button>
+        <button class="m-bt" onclick="runLatestZpl()">최근 ZPL 인쇄<small>PC 프린터로 출력</small></button>
+      </div>
+      <div class="m-sub2">Serial 등록 · POD · 스페어 · 배송장 · 퀵 안내문은 보드 탭에서 행을 체크하면 아래에 뜹니다.</div>
+    </div>
+  </section>
+
+  <section id="pgTicket" hidden>
+    <div class="m-sec">
+      <div class="m-g2">
+        <button class="m-bt p" id="mTkCheck" onclick="runTicketCheck()">🔄 티켓 확인<small>수신함에서 새 티켓 확인</small></button>
+        <div>
+          <input class="m-in" id="mTkNum" placeholder="SDSK 1339513698" style="margin:0 0 6px">
+          <button class="m-bt s" style="width:100%" id="mTkNumBtn" onclick="mReadTicketNum()">번호로 읽기</button>
+        </div>
+      </div>
+      <div class="m-msg" id="mTkMsg"></div>
+    </div>
+    <div class="m-sec"><h4>티켓 결과</h4>
+      <button class="m-bt p" style="width:100%" onclick="showTicketReport()">티켓 결과 열기 (처리할 것 · 반영)</button>
+      <div class="m-sub2">결과 화면에서 [반영] 버튼을 누르면 PC와 똑같이 배송장에 적용됩니다. 잘못 적용하면 위의 ↶ 로 되돌립니다.</div>
+    </div>
+  </section>
+
+  <div id="mBar">
+    <div class="r1"><button class="n" id="mBarTog" onclick="document.getElementById('mBar').classList.toggle('min')"><span id="mBarN">0</span>개 선택 <i>▾</i></button>
+      <button class="m-ab d" onclick="processDone()">Done</button>
+      <button class="m-ab r" onclick="processPickupReady()">Ready</button>
+      <button class="m-ab c" onclick="processCancel()">Cancel</button>
+      <button class="m-ab z" onclick="processReset()">초기화</button></div>
+    <div class="r2 more"><button class="m-ab p" onclick="runPortalBatch()">Serial 등록 &amp; QR</button>
+      <button class="m-ab p" onclick="runPodBatch()">POD</button>
+      <button class="m-ab z" onclick="runSpareOneshot()">스페어 배송</button></div>
+    <div class="r2 more"><button class="m-ab z" onclick="printChecked()">배송장 인쇄</button>
+      <button class="m-ab z" onclick="openQuickPrint()">퀵 기사님 안내문</button></div>
+  </div>
+  <nav id="mTabs">
+    <button class="m-tab on" data-p="board"><b>▤</b>보드</button>
+    <button class="m-tab" data-p="work"><b>⚡</b>작업</button>
+    <button class="m-tab" data-p="ticket"><b>🎫</b>티켓</button>
+  </nav>
+</div>

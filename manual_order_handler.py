@@ -220,7 +220,7 @@ def _write_and_notify(rows, order_num):
         if message:
             lines = message.split('\n')
             toast_title, toast_body = lines[0], '\n'.join(lines[1:])
-            send_windows_notification(toast_title, toast_body)
+            send_windows_notification(toast_title, toast_body, telegram=False)
     except Exception as e:
         logger.warning(f"윈도우 알림 예외 ({order_num}): {e}")
 

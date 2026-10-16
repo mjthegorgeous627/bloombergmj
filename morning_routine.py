@@ -274,6 +274,77 @@ def open_bloomberg_login():
         logger.warning(f"Bloomberg ID/비번 자동입력 실패 (직접 입력 필요): {e}")
 
 
+def _tg(text):
+    """폰(텔레그램) 일반 알림(영업시간 밖이면 telegram_notify가 알아서 안 보냄) - 실패해도 루틴을 막지 않는다."""
+    try:
+        from telegram_notify import send_telegram
+        send_telegram(text, wait=True)
+    except Exception:
+        logger.warning("텔레그램 알림 실패(무시)", exc_info=True)
+
+
+FIRST_CYCLE_WAIT_SEC = 25 * 60   # SAP 로그인+첫 사이클을 기다리는 최대 시간
+
+
+def _wait_first_cycle(t0):
+    """루프 첫 사이클(cycle_state.json이 running -> idle)이 끝나길 기다린다. 끝났으면 True, 시간 초과면 False."""
+    import json
+    from datetime import datetime
+    state_file = os.path.join(BASE_DIR, "cycle_state.json")
+    seen_running = False
+    deadline = time.time() + FIRST_CYCLE_WAIT_SEC
+    while time.time() < deadline:
+        try:
+            with open(state_file, "r", encoding="utf-8") as fh:
+                st = json.load(fh)
+            since = datetime.fromisoformat(st.get("since", "")).timestamp()
+            if since >= t0:
+                if st.get("status") == "running":
+                    seen_running = True
+                elif st.get("status") == "idle" and seen_running:
+                    return True
+        except Exception:
+            pass
+        time.sleep(10)
+    return False
+
+
+def _morning_report(t0):
+    """아침 요약: 루프/워크벤치가 실제로 떠 있는지 확인하고(2026-10-16 사용자 요청), 루프 첫 사이클이 끝난 뒤
+    새 오더 집계 + 쌓인 오더 개별 전송은 telegram_notify.send_morning_summary()가 한다."""
+    import json
+    import urllib.request
+    lines = []
+    ok = True
+    first_done = _wait_first_cycle(t0)
+    loop_pids = _pids_matching(r"main\.py", r"startup\.py")
+    if loop_pids:
+        lines.append("✅ SAP 루프 정상 시작")
+    else:
+        ok = False
+        lines.append("❌ SAP 루프가 떠 있지 않음")
+    if not first_done:
+        ok = False
+        lines.append("⚠️ 루프 첫 조회 완료를 확인하지 못함 (시간 초과) - 새 오더 수가 부정확할 수 있음")
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8765/api/sap/status", timeout=10) as resp:
+            st = json.loads(resp.read().decode("utf-8"))
+        if st.get("loopRunning"):
+            lines.append("✅ Workbench 정상 시작")
+        else:
+            ok = False
+            lines.append("⚠️ Workbench는 떠 있지만 루프 중지 상태")
+    except Exception:
+        ok = False
+        lines.append("❌ Workbench 응답 없음")
+    lines.append("👉 Bloomberg B-Unit 인증은 직접 진행해야 합니다")
+    try:
+        from telegram_notify import send_morning_summary
+        send_morning_summary(lines, ok)
+    except Exception:
+        logger.warning("아침 요약 전송 실패(무시)", exc_info=True)
+
+
 def main():
     # 2026-09-13: Windows 작업 스케줄러(SAP_Morning_Routine)는 요일 구분 없이
     # 매일 08:30에 이 스크립트를 실행한다 - 주말/한국 공휴일에도 그대로 SAP에
@@ -286,14 +357,26 @@ def main():
         logger.info(f"=== 아침 자동 루틴 건너뜀 ({reason} - 자동 기동 안 함) ===")
         return
     logger.info("=== 아침 자동 루틴 시작 ===")
-    start_sap_loop()
-    time.sleep(2)  # SAP 프로세스 창 생성 여유
-    start_workbench()
-    time.sleep(2)
-    start_tray_icon()
-    time.sleep(2)
-    open_bloomberg_login()
+    t0 = time.time()
+    try:
+        start_sap_loop()
+        time.sleep(2)  # SAP 프로세스 창 생성 여유
+        start_workbench()
+        time.sleep(2)
+        start_tray_icon()
+        time.sleep(2)
+        try:   # 2026-10-16: 폰(원격 데스크톱)용 /m 창을 오른쪽 모니터에 - 실패해도 루틴은 계속. Bloomberg 로그인 자동입력(포커스 민감) 전에 끝낸다.
+            from mobile_window import open_mobile_window
+            open_mobile_window()
+        except Exception:
+            logger.warning("모바일 창 열기 실패(무시)", exc_info=True)
+        open_bloomberg_login()
+    except Exception as e:
+        logger.exception("아침 자동 루틴 중 예외")
+        _tg(f"❌ 아침 루틴 오류: {type(e).__name__}: {e}")
+        raise
     logger.info("=== 아침 자동 루틴 완료 (Bloomberg B-Unit 로그인은 직접 진행) ===")
+    _morning_report(t0)
 
 
 if __name__ == "__main__":

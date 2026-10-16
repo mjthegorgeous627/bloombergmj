@@ -29,3 +29,12 @@ _scratch_check.txt
 order_locks/
 stop_automation.flag
 cycle_state.json
+
+# moved-aside backups / debug output
+archive/backups/
+archive/debug_output/
+telegram_config.json
+telegram_queue.json
+telegram_queue.json.lock
+telegram_queue.json.tmp
+_m_chrome_profile/
