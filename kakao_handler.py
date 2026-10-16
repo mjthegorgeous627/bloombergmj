@@ -148,6 +148,10 @@ def _refresh_access_token(tokens):
 
 # ── 전송 ────────────────────────────────────────────────────────────────────
 
+# 2026-10-16 텔레그램 폰 알림이 정상 동작해 카톡 전송 중단. 다시 켜려면 True.
+KAKAO_SEND_ENABLED = False
+
+
 def send_kakao_message(text):
     """
     카카오 나에게 보내기. 토큰 만료 시 자동 갱신.
@@ -202,4 +206,7 @@ def send_kakao_order(order_data_list):
         send_order(message, order_action(order_data_list))   # 폰 푸시용(영업시간/아침요약 규칙은 telegram_notify.py) - 카톡 성공/실패와 무관
     except Exception:
         logger.warning("[텔레그램] 전송 호출 실패(무시)", exc_info=True)
+    if not KAKAO_SEND_ENABLED:
+        logger.info("[카카오] 전송 생략(KAKAO_SEND_ENABLED=False, 텔레그램으로 대체)")
+        return True   # 호출부가 True면 '전송됨' 처리하는 흐름을 그대로 유지
     return send_kakao_message(message)
