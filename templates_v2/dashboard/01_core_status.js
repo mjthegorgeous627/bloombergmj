@@ -121,7 +121,7 @@ function _tkProposalBox(it, b, card, opts){
     const head=document.createElement('div'); head.style.cssText='color:#555;margin-bottom:4px'; head.textContent='새 행 미리보기  (Order# SDSK '+it.key+')'; wrap.appendChild(head);
     const line=(label,node)=>{ const r=document.createElement('div'); r.style.cssText='display:flex;gap:10px;margin:2px 0'; const l=document.createElement('span'); l.style.cssText='flex:none;width:56px;color:#777'; l.textContent=label; r.appendChild(l); node.style.flex='1'; r.appendChild(node); wrap.appendChild(r); };
     const sel=document.createElement('select'); sel.style.cssText='flex:none;width:auto;padding:1px 4px'; const cur=n.type||'배송';
-    ['배송','회수','업무'].concat(['배송','회수','업무'].includes(cur)?[]:[cur]).forEach(v=>{ const o=document.createElement('option'); o.value=o.textContent=v; if(v===cur) o.selected=true; sel.appendChild(o); });
+    ['배송','회수','Bloomberg','업무'].concat(['배송','회수','Bloomberg','업무'].includes(cur)?[]:[cur]).forEach(v=>{ const o=document.createElement('option'); o.value=o.textContent=v; if(v===cur) o.selected=true; sel.appendChild(o); });
     n.type=sel.value; sel.onchange=()=>{ n.type=sel.value; };
     const sw=document.createElement('span'); sw.appendChild(sel); line('Type',sw);
     [['품목','item'],['MN','mn'],['S/N','sn'],['받는 곳','customer'],['주소','address'],['메모','memo']].forEach(([lab,k])=>{
@@ -198,7 +198,7 @@ function _ticketCards(box, items, opts){
       const ago=_tkAgo(it.last_checked);
       const stamp=_tkEl('span','flex:1 1 200px;color:'+(!ago?'#c0392b':ago.days>=7?'#d9822b':SUB),'마지막 확인  '+(ago?(ago.txt+(ago.days>0?'  ('+ago.days+'일 전)':'  (오늘)')):'확인 안 함')+(reflected?'  ·  배송장에 반영함':''));
       bar.appendChild(stamp);
-      const wdate=_tkDateInput(it.due||it.due_auto||((it.board&&it.board.new_row&&it.board.new_row.date)||''), false);
+      const wdate=_tkDateInput(it.due||it.due_auto||((it.board&&it.board.new_row&&it.board.new_row.date)||((it.board&&it.board.action==='new_row')?new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10):'')), false);
       wdate.onchange=async()=>{ try{ const r=await fetch('/api/tickets/due',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key,due:wdate.value})}); const d=await r.json(); if(!r.ok||d.error) throw new Error(d.error||'실패'); toast(wdate.value?('할 일 날짜 '+wdate.value+' 저장 (다음에 열면 날짜순으로 정렬됩니다)'):'할 일 날짜를 지웠습니다'); }catch(err){ toast('날짜 저장 실패: '+err.message); } };
       const wwrap=_tkEl('span','display:inline-flex;gap:6px;align-items:center'); wwrap.appendChild(_tkEl('span','color:'+SUB+';font-size:13px','할 일 날짜')); wwrap.appendChild(wdate);
       if(!it.due&&it.due_auto&&wdate.value===it.due_auto){ const h2=_tkEl('span','color:'+SUB+';font-size:12px','(To do 기준)'); wwrap.appendChild(h2); wdate.addEventListener('input',()=>h2.remove()); }
@@ -226,7 +226,7 @@ function _ticketCards(box, items, opts){
       const b=it.board&&it.board.action&&it.board.action!=='none' ? it.board : null;
       card.appendChild(_tkProposalBox(it,b,card,opts));
       bar.appendChild(_tkEl('span','flex:1 1 200px',(!b&&reflected)?'배송장에 반영함':b?('배송장에 반영: '+String(b.question||'').replace(/\s*(하겠습니까|할까요)\?/,'')+(b.row_label?('  ('+b.row_label+')'):'')):''));
-      const initD=it.due||it.due_auto||(b&&((b.new_row&&b.new_row.date)||(b.action==='set_date'&&b.date)))||'';
+      const initD=it.due||it.due_auto||(b&&((b.new_row&&b.new_row.date)||(b.action==='set_date'&&b.date)))||((b&&b.action==='new_row')?new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10):'');
       const dateIn=_tkDateInput(initD, !!(b&&b.action==='new_row'));
       const lab0=_tkEl('span','color:'+SUB+';font-size:13px','할 일 날짜'); const dwrap=_tkEl('span','display:inline-flex;gap:6px;align-items:center'); dwrap.appendChild(lab0); dwrap.appendChild(dateIn);
       if(!it.due&&it.due_auto&&dateIn.value===it.due_auto){ const hint=_tkEl('span','color:'+SUB+';font-size:12px','(To do 기준)'); dwrap.appendChild(hint); dateIn.addEventListener('input',()=>hint.remove()); }

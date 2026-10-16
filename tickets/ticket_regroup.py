@@ -12,6 +12,7 @@ import ticket_store  # noqa: E402
 
 CLAUDE_EXE = os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
 ALLOWED = ["Bash(python -X utf8 tickets/ticket_tools.py board:*)"]
+LOG = os.path.join(HERE, "runs", "corrections.jsonl")
 NL = chr(10)
 
 RULES = """너는 SAP/물류 담당자(MINJUNG SUH, 서울 창고팀)의 비서다. 아래 티켓 내용과 사용자의 지시를 보고 **배송장 반영 제안만** 다시 만든다. 터미널은 쓰지 않는다.
@@ -54,4 +55,11 @@ def regroup(key, instruction):
     if isinstance(bd, dict) and bd.get("action") == "new_row" and not isinstance(bd.get("new_row"), dict):
         fields = ("type", "order_no", "item", "mn", "sn", "customer", "phone", "address", "memo", "date")
         bd["new_row"] = {k: bd.pop(k) for k in fields if k in bd}
+    try:   # 사용자가 고친 내역을 쌓아 둔다(반복되면 PLAYBOOK 규칙 후보로 제안하기 위해)
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        with open(LOG, "a", encoding="utf-8") as lf:
+            lf.write(json.dumps({"at": __import__("datetime").datetime.now().isoformat(timespec="seconds"), "key": key, "title": t.get("title"),
+                                 "instruction": ins, "before": t.get("board"), "after": data.get("board")}, ensure_ascii=False) + NL)
+    except Exception:
+        pass
     return ticket_store.set_proposal(key, data.get("todo"), data.get("board"), data.get("due"))
