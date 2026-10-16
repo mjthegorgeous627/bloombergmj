@@ -187,7 +187,10 @@ const MANUAL_ROW_COLUMNS=['제목','M/N','S/N','Customer','Phone','Address','Mem
 // after a reload. Now seeded from the server (custom_types table via
 // __CUSTOM_TYPES__, see render_dashboard_page()) and every newly-added one
 // is persisted immediately - see the '__add__' branch below.
-const BASE_TYPES = ['배송','회수','Bloomberg','Delayed','회수 Delayed'];
+const BASE_TYPES = ['배송','회수','배송_퀵','회수_퀵','Bloomberg','Delayed','회수 Delayed'];
+// 회수 계열(회수/회수_퀵/회수 Delayed)과 퀵 계열(배송_퀵/회수_퀵) 판별 - 2026-10-16
+function isPickupType(t){ return String(t||'').startsWith('회수'); }
+function isQuickType(t){ return /_퀵$/.test(String(t||'')); }
 let CUSTOM_TYPES = __CUSTOM_TYPES__;
 function allTypeOptions(){ return [...BASE_TYPES, ...CUSTOM_TYPES]; }
 
@@ -206,8 +209,8 @@ function nonworkingInfo(iso){
   return {non:false, label:''};
 }
 function typeClassFor(v){
-  if(v==='회수' || v==='회수 Delayed') return 'type-pickup';
-  if(v==='배송') return 'type-delivery';
+  if(isPickupType(v)) return 'type-pickup';
+  if(v==='배송' || v==='배송_퀵') return 'type-delivery';
   return 'type-other';
 }
 

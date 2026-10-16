@@ -276,10 +276,15 @@ function selectAllRowsOfDate(iso){
   return on;
 }
 function printChecked(){
+  // 2026-10-16: BG/퀵 칸으로 인쇄 대상 거르기 (퀵 = Type이 _퀵으로 끝나는 행)
+  const _bg=document.getElementById('chk_bg'), _qk=document.getElementById('chk_quick');
+  const wantBg=_bg?_bg.checked:true, wantQuick=_qk?_qk.checked:true;
+  if(!wantBg && !wantQuick){ toast('BG 또는 퀵 칸을 하나 이상 체크하세요'); return; }
+  const typeOk=r=>isQuickType(r.itemType)?wantQuick:wantBg;
   const checkedRowKeys=new Set([...document.querySelectorAll('.row-check:checked')].map(cb=>cb.dataset.rowKey));
   const sections=[];
   allDatesSorted().forEach(iso=>{
-    const rows=ROWS.filter(r=>r.date===iso);
+    const rows=ROWS.filter(r=>r.date===iso && typeOk(r));
     const groups=groupRows(rows);
     const wholeDate=EXPORT_DATES.has(iso);
     // 2026-10-16: 날짜 줄 체크박스(마감용)를 눌러 '날짜 전체' 모드가 돼도, 그 체크박스가 자동으로
@@ -335,7 +340,7 @@ function printChecked(){
       group.rows.forEach((row, i)=>{
         const tr=document.createElement('tr');
         const typeTd=document.createElement('td'); typeTd.textContent=row.itemType||'';
-        if(row.itemType==='배송') typeTd.className='print-type-delivery';
+        if(row.itemType==='배송' || row.itemType==='배송_퀵') typeTd.className='print-type-delivery';
         tr.appendChild(typeTd);
         if(i===0){
           const ordTd=document.createElement('td'); ordTd.rowSpan=n; ordTd.textContent=row.orderLabel||'';

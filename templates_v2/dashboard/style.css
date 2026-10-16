@@ -154,7 +154,7 @@ tbody.date-group.collapsed .item-row,tbody.date-group.collapsed .empty-row{displ
 
 .type-cell{text-align:center}
 .type-select{font-weight:700;border:1px solid transparent;background:transparent;
-  border-radius:5px;padding:2px 4px;cursor:pointer;font-size:12px}
+  border-radius:5px;padding:2px 4px;cursor:pointer;font-size:12px;display:block;width:7.5em;margin:0 auto;text-align:left;text-align-last:left}
 .type-select:hover{border-color:var(--line-strong)}
 .type-delivery{color:#2563eb}
 .type-pickup{color:#dc2626}

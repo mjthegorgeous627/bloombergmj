@@ -267,8 +267,8 @@ class Bot:
         if code == "D":
             groups = {"done": [r["itemId"] for r in rs]}; label = "Done(파랑)"
         elif code == "R":   # 화면 Ready와 같은 규칙: 회수는 대기(빨강), 나머지는 완료
-            groups = {"pending": [r["itemId"] for r in rs if r.get("itemType") == "회수"],
-                      "done": [r["itemId"] for r in rs if r.get("itemType") != "회수"]}; label = "Ready(회수 대기 · 나머지 완료)"
+            groups = {"pending": [r["itemId"] for r in rs if r.get("itemType") in ("회수", "회수_퀵")],
+                      "done": [r["itemId"] for r in rs if r.get("itemType") not in ("회수", "회수_퀵")]}; label = "Ready(회수 대기 · 나머지 완료)"
         elif code == "C":
             groups = {"cancelled": [r["itemId"] for r in rs]}; label = "Cancel(회색)"
         else:

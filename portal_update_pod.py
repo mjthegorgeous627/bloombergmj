@@ -248,7 +248,7 @@ def _build_remarks_from_items(items, signed_by, pickup_done):
         label = _item_label(item.get("description"))
         qty = item.get("qty") or 1
         item_type = str(item.get("item_type") or "")
-        if item_type in ("회수", "회수 Delayed"):
+        if item_type in ("회수", "회수_퀵", "회수 Delayed"):
             pickup_expected = True
             if pickup_done:
                 pickups.append((label, qty))
@@ -286,7 +286,7 @@ def prepare_values(order, signed_by=None, delivery_datetime=None, remarks=None, 
             serial = _serial_text(item.get("serial"))
             if not serial or serial.upper() == "X":
                 continue
-            if str(item.get("item_type") or "") in ("회수", "회수 Delayed"):
+            if str(item.get("item_type") or "") in ("회수", "회수_퀵", "회수 Delayed"):
                 pickup_serials.append(serial)
             else:
                 delivery_serials.append(serial)

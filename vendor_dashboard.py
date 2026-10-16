@@ -194,7 +194,7 @@ def _collect_day(sheet):
                 order_num = f"{kind}:{row_idx}:{order_text}"
             current_kind = kind
             current_order = order_num
-            current_quick = "퀵" in memo
+            current_quick = "퀵" in memo or "퀵" in order_text
         else:
             kind = current_kind
             order_num = current_order
@@ -213,7 +213,7 @@ def _collect_day(sheet):
 
         if kind == "delivery":
             stats["delivery_orders"].add(order_num)
-            if current_quick or "퀵" in memo:
+            if current_quick or "퀵" in memo or "퀵" in order_text:
                 stats["delivery_quick_orders"].add(order_num)
             stats["delivery_items"][category] += qty
         elif kind == "pickup":

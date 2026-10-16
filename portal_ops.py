@@ -163,7 +163,7 @@ def run_portal(order_id, skip_qr=False):
                 "no_serial": item["mode"] == "material_only" or not item["serial"],
                 "description": item["description"] or "",
             }
-            if leg == "회수":
+            if leg in ("회수", "회수_퀵"):
                 skipped_return_items.append(entry)
                 continue
             # SAP combines multiple units of the same material into ONE
@@ -527,8 +527,8 @@ def run_pod_update(order_ids, signed_by="", dt="", remarks="", pickup_done=False
                     f"SELECT id, item_type FROM order_items WHERE id IN ({placeholders})",
                     resolved_item_ids,
                 ).fetchall()
-            pickup_ids = [r["id"] for r in type_rows if (r["item_type"] or "").strip() == "회수"]
-            delivery_ids = [r["id"] for r in type_rows if (r["item_type"] or "").strip() != "회수"]
+            pickup_ids = [r["id"] for r in type_rows if (r["item_type"] or "").strip() in ("회수", "회수_퀵")]
+            delivery_ids = [r["id"] for r in type_rows if (r["item_type"] or "").strip() not in ("회수", "회수_퀵")]
             if delivery_ids:
                 set_items_board_status(delivery_ids, "done")
             if pickup_ids:

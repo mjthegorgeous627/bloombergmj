@@ -199,15 +199,32 @@ def calendar_counts(date_from, date_to):
         conn = history_search._connect()
         try:
             rows = conn.execute(
-                "SELECT s.sheet_date AS d, s.id AS sid, COUNT(DISTINCT r.group_no) AS n "
+                "SELECT s.sheet_date AS d, s.id AS sid, r.group_no AS g, r.fills_json AS f "
                 "FROM sheets s JOIN rows r ON r.sheet_id = s.id "
-                "WHERE s.sheet_date BETWEEN ? AND ? GROUP BY s.id",
+                "WHERE s.sheet_date BETWEEN ? AND ?",
                 (date_from, date_to),
             ).fetchall()
         finally:
             conn.close()
+        # 2026-10-16: 취소(회색 D9D9D9)·billed(초록 92D050)로 마감된 오더는 배송한 게 아니므로 센 숫자에서 뺀다
+        # (오더 묶음의 모든 행 A칸이 회색이면 취소 묶음).
+        import json as _json
+        groups = {}
         for r in rows:
-            out[r["d"]] = max(out.get(r["d"], 0), r["n"])
+            cancelled_row = False
+            if r["f"]:
+                try:
+                    cancelled_row = (_json.loads(r["f"]).get("0") or "").upper() in ("D9D9D9", "92D050")
+                except Exception:
+                    pass
+            k = (r["d"], r["sid"], r["g"])
+            groups[k] = groups.get(k, True) and cancelled_row
+        per_sheet = {}
+        for (d, sid, g), all_cancelled in groups.items():
+            if not all_cancelled:
+                per_sheet[(d, sid)] = per_sheet.get((d, sid), 0) + 1
+        for (d, sid), n in per_sheet.items():
+            out[d] = max(out.get(d, 0), n)
     except Exception:
         pass
     ensure_db()

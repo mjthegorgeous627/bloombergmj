@@ -45,7 +45,7 @@ function loadSideFin(y, m, force){
 // 마감 직후: 방금 마감한 행들의 날짜별 오더 수를 서버에 누적하고(이력 재색인 전 공백 보완) 화면에도 바로 반영
 function recordFinalizedCounts(rows){
   const per = {};
-  rows.forEach(r => { const k = (typeof mergeKey === 'function' ? mergeKey(r) : '') || r.rowKey; (per[r.date] = per[r.date] || {})[k] = 1; });
+  rows.filter(r => !['cancelled','billed'].includes(r.uiStatus)).forEach(r => { const k = (typeof mergeKey === 'function' ? mergeKey(r) : '') || r.rowKey; (per[r.date] = per[r.date] || {})[k] = 1; });
   const counts = {};
   Object.keys(per).forEach(iso => { counts[iso] = Object.keys(per[iso]).length; SIDE_FIN[iso] = (SIDE_FIN[iso] || 0) + counts[iso]; });
   try{ fetch('/api/calendar/finalized', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ counts: counts }) }).catch(() => {}); }catch(e){}
@@ -53,7 +53,7 @@ function recordFinalizedCounts(rows){
 function sideDateStat(iso){
   const rs = ROWS.filter(r => r.date === iso);
   const keys = {};
-  rs.forEach(r => { keys[(typeof mergeKey === 'function' ? mergeKey(r) : '') || r.rowKey] = 1; });
+  rs.filter(r => !['cancelled','billed'].includes(r.uiStatus)).forEach(r => { keys[(typeof mergeKey === 'function' ? mergeKey(r) : '') || r.rowKey] = 1; });   // 취소·billed는 배송한 게 아니라 숫자에서 제외
   let left = 0, pend = 0;
   rs.forEach(r => {
     if(!['done', 'cancelled', 'billed'].includes(r.uiStatus)) left++;
@@ -716,10 +716,10 @@ function printQuick(){
 function formFlag(k){ try{ return localStorage.getItem('wbForm_' + k) === '1'; }catch(e){ return false; } }
 function setFormFlag(k, on){ try{ localStorage.setItem('wbForm_' + k, on ? '1' : '0'); }catch(e){} }
 function initFormBoxes(){
-  ['pod', 'poc'].forEach(k => {
+  ['pod', 'poc', 'bg', 'quick'].forEach(k => {
     const el = document.getElementById('chk_' + k);
     if(!el) return;
-    el.checked = formFlag(k);
+    el.checked = (k === 'bg' || k === 'quick') ? (localStorage.getItem('wbForm_' + k) !== '0') : formFlag(k);   // BG/퀵은 기본 둘 다 켜짐
     el.addEventListener('change', () => setFormFlag(k, el.checked));
   });
 }

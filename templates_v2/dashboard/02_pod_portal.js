@@ -108,7 +108,7 @@ async function podForLabel(label, groupRows_){
   // only", checking both means "delivery and pickup both done", exactly
   // like checking rows already drives every other bulk action on the
   // board (Done/삭제/날짜이동/병합 etc).
-  const pickupDone=groupRows_.some(r=>r.itemType==='회수' || r.itemType==='회수 Delayed');
+  const pickupDone=groupRows_.some(r=>isPickupType(r.itemType));
   // Only the CHECKED rows' item ids go to the server - the remarks text
   // (Delivered/collected item counts) is built from exactly these, not
   // Excel and not every item the order happens to have, so checking just
@@ -157,7 +157,7 @@ async function runSpareOneshot(){
   for(const label of labels){
     const groupRows_=checkedRows.filter(r=>r.orderLabel===label);
     const orderIds=[...new Set(groupRows_.map(r=>r.orderId))];
-    const pickupDone=groupRows_.some(r=>r.itemType==='회수' || r.itemType==='회수 Delayed');
+    const pickupDone=groupRows_.some(r=>isPickupType(r.itemType));
     const itemIds=groupRows_.map(r=>r.itemId);
 
     const preview=await podFetchPreview(label, orderIds, itemIds, pickupDone);

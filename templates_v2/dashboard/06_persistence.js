@@ -67,7 +67,19 @@ async function persistOrderField(itemIds, field, value){
   });
   const data=await res.json();
   if(!res.ok || data.error) throw new Error(data.error||'저장 실패');
+  if(field==='memo' && String(value||'').includes('퀵')) autoQuickType(itemIds);
   return true;
+}
+// 2026-10-16: 메모에 '퀵'이 있으면 배송→배송_퀵, 회수→회수_퀵 (다른 Type은 그대로). 직접 다시 고를 수도 있음.
+function autoQuickType(itemIds){
+  let changed=false;
+  ROWS.filter(r=>itemIds.includes(r.itemId)).forEach(r=>{
+    const next=r.itemType==='배송'?'배송_퀵':r.itemType==='회수'?'회수_퀵':'';
+    if(!next) return;
+    r.itemType=next; changed=true;
+    persistItemField(r.itemId,'item_type',next).catch(err=>toast('Type 저장 실패: '+err.message));
+  });
+  if(changed) setTimeout(()=>{ if(typeof renderAll==='function') renderAll(); },0);
 }
 async function persistCustomType(name){
   const res=await fetch('/api/custom_types/add', {
@@ -242,12 +254,12 @@ async function processPickupReady(){
   const keys=[...document.querySelectorAll('.row-check:checked')].map(cb=>cb.dataset.rowKey);
   if(!keys.length){toast('체크된 행이 없습니다');return}
   const checkedRows=ROWS.filter(r=>keys.includes(r.rowKey));
-  const pendingIds=checkedRows.filter(r=>r.itemType==='회수').map(r=>r.itemId);
-  const doneIds=checkedRows.filter(r=>r.itemType!=='회수').map(r=>r.itemId);
+  const pendingIds=checkedRows.filter(r=>(r.itemType==='회수'||r.itemType==='회수_퀵')).map(r=>r.itemId);
+  const doneIds=checkedRows.filter(r=>!(r.itemType==='회수'||r.itemType==='회수_퀵')).map(r=>r.itemId);
   try{
     await Promise.all([persistItemStatus(pendingIds,'pending'), persistItemStatus(doneIds,'done')]);
   }catch(err){toast('상태 저장 실패: '+err.message);return}
-  checkedRows.forEach(row=>{row.uiStatus = row.itemType==='회수' ? 'pending' : 'done'});
+  checkedRows.forEach(row=>{row.uiStatus = (row.itemType==='회수'||row.itemType==='회수_퀵') ? 'pending' : 'done'});
   clearRowErrorFlags([...pendingIds, ...doneIds]);
   await stackSettledToTop([...pendingIds, ...doneIds]);
   renderAll();

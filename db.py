@@ -99,7 +99,7 @@ QTY_RE = re.compile(r"\bQty\s*[:#-]?\s*(\d+)\b|\bx\s*(\d+)\b", re.I)
 # block boundaries; TYPE_PREFIX_RE reads the real 배송/회수 marker that sits at
 # the front of column A on every item row.
 DATE_HEADER_RE = re.compile(r"(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일")
-TYPE_PREFIX_RE = re.compile(r"^\s*(배송|회수)\b")
+TYPE_PREFIX_RE = re.compile(r"^\s*((?:배송|회수)(?:_퀵)?)(?![\w])")
 
 
 def now_text() -> str:
